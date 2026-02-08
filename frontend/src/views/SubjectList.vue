@@ -1,0 +1,171 @@
+<template>
+  <div class="page-container">
+    <div class="page-header">
+      <h2>课程管理</h2>
+      <el-button type="primary" @click="showDialog()">
+        <el-icon><Plus /></el-icon> 添加课程
+      </el-button>
+    </div>
+
+    <el-table :data="subjects" stripe border>
+      <el-table-column prop="id" label="ID" width="60" />
+      <el-table-column prop="name" label="课程名称" />
+      <el-table-column prop="weekly_hours" label="周课时" width="80" />
+      <el-table-column label="上午优先" width="80">
+        <template #default="{ row }">
+          <el-tag v-if="row.is_am_preferred" type="success" size="small">是</el-tag>
+          <el-tag v-else type="info" size="small">否</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="主课" width="70">
+        <template #default="{ row }">
+          <el-tag v-if="row.is_main_subject" type="danger" size="small">是</el-tag>
+          <el-tag v-else type="info" size="small">否</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="允许连堂" width="80">
+        <template #default="{ row }">
+          <el-tag v-if="row.allow_consecutive" type="success" size="small">是</el-tag>
+          <el-tag v-else type="info" size="small">否</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="max_daily_limit" label="单日上限" width="80" />
+      <el-table-column prop="max_teacher_classes" label="单师班数" width="90" />
+      <el-table-column prop="location_type_display" label="场地类型" />
+      <el-table-column label="合班课" width="80">
+        <template #default="{ row }">
+          <el-tag v-if="row.is_combined_class" type="warning" size="small">是</el-tag>
+          <el-tag v-else type="info" size="small">否</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="适用年级" width="120">
+        <template #default="{ row }">
+          <span v-if="row.applicable_grades">{{ row.applicable_grades }}</span>
+          <span v-else style="color: #909399">全部</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="150">
+        <template #default="{ row }">
+          <el-button size="small" @click="showDialog(row)">编辑</el-button>
+          <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑课程' : '添加课程'" width="600px">
+      <el-form :model="form" label-width="100px">
+        <el-form-item label="课程名称" required>
+          <el-input v-model="form.name" />
+        </el-form-item>
+        <el-form-item label="周课时" required>
+          <el-input-number v-model="form.weekly_hours" :min="1" :max="10" />
+        </el-form-item>
+        <el-form-item label="单日上限">
+          <el-input-number v-model="form.max_daily_limit" :min="1" :max="4" />
+        </el-form-item>
+        <el-form-item label="单师最多班数">
+          <el-input-number v-model="form.max_teacher_classes" :min="1" :max="5" />
+          <div style="color: #909399; font-size: 12px; margin-top: 5px">
+            同一教师最多教几个班的该课程（1=只教1个班，5=最多教5个班）
+          </div>
+        </el-form-item>
+        <el-form-item label="场地类型">
+          <el-select v-model="form.location_type">
+            <el-option label="普通教室" value="NORMAL" />
+            <el-option label="操场" value="PLAYGROUND" />
+            <el-option label="实验室" value="LAB" />
+            <el-option label="家政室" value="HOME_EC" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="选项">
+          <el-checkbox v-model="form.is_main_subject">主课</el-checkbox>
+          <el-checkbox v-model="form.is_am_preferred">上午优先</el-checkbox>
+          <el-checkbox v-model="form.allow_consecutive">允许连堂</el-checkbox>
+          <el-checkbox v-model="form.is_combined_class">合班课</el-checkbox>
+          <el-checkbox v-model="form.avoid_first_period">避免第一节</el-checkbox>
+        </el-form-item>
+        <el-form-item label="适用年级">
+          <el-input v-model="form.applicable_grades" placeholder="如 1,2,3 留空表示所有年级" />
+          <div style="color: #909399; font-size: 12px; margin-top: 5px">
+            逗号分隔的年级编号，留空表示所有年级都开设此课程
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSave">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getSubjects, createSubject, updateSubject, deleteSubject } from '../api/subjects'
+
+const subjects = ref([])
+const dialogVisible = ref(false)
+const editingId = ref(null)
+const form = ref({
+  name: '', weekly_hours: 1, is_main_subject: false, is_am_preferred: false,
+  allow_consecutive: false, max_daily_limit: 1, max_teacher_classes: 1,
+  location_type: 'NORMAL', is_combined_class: false,
+  applicable_grades: '', avoid_first_period: false
+})
+
+const loadData = async () => {
+  subjects.value = await getSubjects()
+}
+
+const showDialog = (row = null) => {
+  if (row) {
+    editingId.value = row.id
+    form.value = { ...row }
+  } else {
+    editingId.value = null
+    form.value = {
+      name: '', weekly_hours: 1, is_main_subject: false, is_am_preferred: false,
+      allow_consecutive: false, max_daily_limit: 1, max_teacher_classes: 1,
+      location_type: 'NORMAL', is_combined_class: false,
+      applicable_grades: '', avoid_first_period: false
+    }
+  }
+  dialogVisible.value = true
+}
+
+const handleSave = async () => {
+  try {
+    if (editingId.value) {
+      await updateSubject(editingId.value, form.value)
+      ElMessage.success('更新成功')
+    } else {
+      await createSubject(form.value)
+      ElMessage.success('添加成功')
+    }
+    dialogVisible.value = false
+    loadData()
+  } catch (e) {
+    ElMessage.error('操作失败')
+  }
+}
+
+const handleDelete = async (row) => {
+  await ElMessageBox.confirm('确定删除该课程?', '提示', { type: 'warning' })
+  try {
+    await deleteSubject(row.id)
+    ElMessage.success('删除成功')
+    loadData()
+  } catch (e) {
+    ElMessage.error('删除失败')
+  }
+}
+
+onMounted(loadData)
+</script>
+
+<style scoped>
+.page-container { background: #fff; padding: 20px; border-radius: 4px; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.page-header h2 { margin: 0; }
+</style>

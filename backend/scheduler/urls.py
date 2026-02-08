@@ -1,0 +1,15 @@
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from . import views
+
+router = DefaultRouter()
+router.register(r'results', views.ScheduleResultViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+    path('run/', views.run_schedule, name='run-schedule'),
+    path('results/<int:pk>/activate/', views.activate_result, name='activate-result'),
+    path('active/', views.active_schedule, name='active-schedule'),
+    path('results/<int:result_id>/class/<int:class_id>/', views.class_timetable, name='class-timetable'),
+    path('results/<int:result_id>/teacher/<int:teacher_id>/', views.teacher_timetable, name='teacher-timetable'),
+]
