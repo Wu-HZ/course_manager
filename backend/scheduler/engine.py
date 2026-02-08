@@ -359,14 +359,7 @@ class ScheduleEngine:
             if teacher.combined_class_group_id:
                 gid = teacher.combined_class_group_id
                 if gid in group_teachers:
-                    # 检查禁排日冲突
-                    day_off = self.teacher_day_off.get(tid)
-                    if day_off in [1, 3]:  # 周二=1, 周四=3
-                        self.errors.append(
-                            f"教师 {teacher.name} 的禁排日与校本课程时段冲突，无法分配到分组"
-                        )
-                    else:
-                        group_teachers[gid].append(tid)
+                    group_teachers[gid].append(tid)
 
         # 2. 收集未指定且未排除的教师
         unassigned = []
@@ -375,10 +368,7 @@ class ScheduleEngine:
                 continue
             if teacher.combined_class_group_id:
                 continue  # 已手动指定
-            # 检查禁排日
-            day_off = self.teacher_day_off.get(tid)
-            if day_off not in [1, 3]:
-                unassigned.append(tid)
+            unassigned.append(tid)
 
         # 3. 随机分配未指定的教师到需要人的组
         random.shuffle(unassigned)
@@ -880,11 +870,7 @@ class ScheduleEngine:
                 manual = []
                 for tid, t in self.teachers.items():
                     if t.combined_class_group_id == group.id and not t.exclude_from_combined:
-                        day_off = self.teacher_day_off.get(tid)
-                        if day_off in [1, 3]:
-                            manual.append(f"{t.name}(禁排日冲突)")
-                        else:
-                            manual.append(t.name)
+                        manual.append(t.name)
                 diagnostics.append(f"  - {group.name}: {', '.join(manual) if manual else '(待自动分配)'}")
 
             # 统计排除和未分配的教师
@@ -892,9 +878,7 @@ class ScheduleEngine:
             unassigned = []
             for tid, t in self.teachers.items():
                 if not t.exclude_from_combined and not t.combined_class_group_id:
-                    day_off = self.teacher_day_off.get(tid)
-                    if day_off not in [1, 3]:
-                        unassigned.append(t.name)
+                    unassigned.append(t.name)
 
             if excluded:
                 diagnostics.append(f"  - 不参与: {', '.join(excluded)}")
