@@ -165,13 +165,18 @@ const qualifiedTeachers = computed(() => {
 })
 
 const loadData = async () => {
-  [assignments.value, classes.value, subjects.value, teachers.value, qualifications.value] = await Promise.all([
-    getAssignments(),
-    getClasses(),
-    getSubjects(),
-    getTeachers(),
-    api.get('/qualifications/')
-  ])
+  try {
+    [assignments.value, classes.value, subjects.value, teachers.value, qualifications.value] = await Promise.all([
+      getAssignments(),
+      getClasses(),
+      getSubjects(),
+      getTeachers(),
+      api.get('/teacher-qualifications/')
+    ])
+  } catch (e) {
+    console.error('加载数据失败:', e)
+    ElMessage.error('加载数据失败')
+  }
 }
 
 // 点击单元格
