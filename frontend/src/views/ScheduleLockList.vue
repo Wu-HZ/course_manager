@@ -2,18 +2,25 @@
   <div class="page-container">
     <div class="page-header">
       <h2>课表锁定</h2>
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <el-select v-model="selectedClassId" placeholder="选择班级" @change="onClassChange" style="width: 200px;">
-          <el-option
-            v-for="c in classes"
-            :key="c.id"
-            :label="c.name"
-            :value="c.id"
-          />
-        </el-select>
-        <el-button type="danger" @click="handleClearAll" :disabled="!selectedClassId || locks.length === 0">
-          清空本班锁定
-        </el-button>
+      <el-button
+        type="danger"
+        @click="handleClearAll"
+        :disabled="!selectedClassId || locks.length === 0"
+      >
+        清空本班锁定
+      </el-button>
+    </div>
+
+    <!-- 班级选择 -->
+    <div class="class-tabs">
+      <div
+        v-for="c in classes"
+        :key="c.id"
+        class="class-tab"
+        :class="{ active: selectedClassId === c.id }"
+        @click="selectClass(c.id)"
+      >
+        {{ c.name }}
       </div>
     </div>
 
@@ -61,9 +68,6 @@
           </tr>
         </tbody>
       </table>
-    </div>
-    <div v-else class="empty-tip">
-      请先选择一个班级
     </div>
 
     <!-- 可用课程列表 -->
@@ -164,9 +168,14 @@ const loadBase = async () => {
     api.get('/classes/'),
     api.get('/subjects/')
   ])
+  // 默认选中第一个班级
+  if (classes.value.length > 0) {
+    selectClass(classes.value[0].id)
+  }
 }
 
-const onClassChange = async () => {
+const selectClass = async (classId) => {
+  selectedClassId.value = classId
   selectedAssignmentId.value = null
   await Promise.all([loadLocks(), loadAssignments()])
 }
@@ -306,6 +315,37 @@ onMounted(loadBase)
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .page-header h2 { margin: 0; }
 
+/* 班级标签 */
+.class-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.class-tab {
+  padding: 8px 20px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  background: #fff;
+}
+
+.class-tab:hover {
+  border-color: #409eff;
+  color: #409eff;
+}
+
+.class-tab.active {
+  background: #409eff;
+  border-color: #409eff;
+  color: #fff;
+}
+
 .schedule-grid { overflow-x: auto; }
 .schedule-grid table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .schedule-grid th, .schedule-grid td {
@@ -337,8 +377,6 @@ onMounted(loadBase)
 
 .empty-cell { color: #dcdfe6; font-size: 20px; }
 .special { color: #909399; font-size: 12px; }
-
-.empty-tip { text-align: center; color: #909399; padding: 60px 0; font-size: 16px; }
 
 /* 可用课程面板 */
 .course-panel {
