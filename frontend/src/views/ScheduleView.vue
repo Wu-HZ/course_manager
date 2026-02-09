@@ -23,6 +23,14 @@
       </el-form>
     </el-card>
 
+    <!-- 教师课时柱状图 -->
+    <el-card v-if="viewType === 'teacher' && allTimetables.length" class="chart-card">
+      <template #header>
+        <span>教师课时分布</span>
+      </template>
+      <v-chart :option="teacherChartOption" style="height: 300px;" autoresize />
+    </el-card>
+
     <!-- 所有课表 -->
     <template v-if="allTimetables.length">
       <el-card v-for="item in allTimetables" :key="item.id" class="timetable-card">
@@ -65,10 +73,18 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
 import TimetableGrid from '../components/TimetableGrid.vue'
 import { getScheduleResults, getClassTimetable, getTeacherTimetable } from '../api/scheduler'
 import { getClasses } from '../api/classes'
 import { getTeachers } from '../api/teachers'
+
+// 注册 ECharts 组件
+use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
 
 const results = ref([])
 const classes = ref([])
@@ -79,6 +95,74 @@ const allTimetables = ref([])
 const combinedAssignments = ref({})
 
 const targets = computed(() => viewType.value === 'class' ? classes.value : teachers.value)
+
+// 教师课时柱状图配置
+const teacherChartOption = computed(() => {
+  // 按课时量从大到小排序
+  const sorted = [...allTimetables.value].sort((a, b) => b.stats.total - a.stats.total)
+
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const data = params[0]
+        const item = sorted[data.dataIndex]
+        return `${item.name}<br/>
+          普通课程: ${item.stats.normal} 节<br/>
+          校本课程: ${item.stats.combined} 节<br/>
+          班会课: ${item.stats.meeting} 节<br/>
+          <strong>合计: ${item.stats.total} 节</strong>`
+      }
+    },
+    grid: {
+      left: '3%',
+      right: '4%',
+      bottom: '3%',
+      containLabel: true
+    },
+    xAxis: {
+      type: 'category',
+      data: sorted.map(t => t.name),
+      axisLabel: {
+        rotate: 30,
+        fontSize: 12
+      }
+    },
+    yAxis: {
+      type: 'value',
+      name: '课时数',
+      minInterval: 1
+    },
+    series: [
+      {
+        name: '普通课程',
+        type: 'bar',
+        stack: 'total',
+        data: sorted.map(t => t.stats.normal),
+        itemStyle: { color: '#409eff' }
+      },
+      {
+        name: '校本课程',
+        type: 'bar',
+        stack: 'total',
+        data: sorted.map(t => t.stats.combined),
+        itemStyle: { color: '#67c23a' }
+      },
+      {
+        name: '班会课',
+        type: 'bar',
+        stack: 'total',
+        data: sorted.map(t => t.stats.meeting),
+        itemStyle: { color: '#e6a23c' }
+      }
+    ],
+    legend: {
+      data: ['普通课程', '校本课程', '班会课'],
+      top: 0
+    }
+  }
+})
 
 // 转换为表格数据格式
 const combinedAssignmentsList = computed(() => {
@@ -172,6 +256,7 @@ onMounted(async () => {
 .page-container { background: #fff; padding: 20px; border-radius: 4px; }
 .page-container h2 { margin-bottom: 20px; }
 .filter-card { margin-bottom: 20px; }
+.chart-card { margin-bottom: 20px; }
 .timetable-card { margin-top: 20px; }
 .combined-card { margin-top: 20px; }
 .timetable-header {
