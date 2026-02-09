@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2>课表锁定</h2>
       <div style="display: flex; align-items: center; gap: 10px;">
-        <el-select v-model="selectedClassId" placeholder="选择班级" @change="loadLocks" style="width: 200px;">
+        <el-select v-model="selectedClassId" placeholder="选择班级" @change="onClassChange" style="width: 200px;">
           <el-option
             v-for="c in classes"
             :key="c.id"
@@ -11,11 +11,23 @@
             :value="c.id"
           />
         </el-select>
-        <el-button type="danger" @click="handleClearAll" :disabled="!selectedClassId">
-          清空全部锁定
+        <el-button type="danger" @click="handleClearAll" :disabled="!selectedClassId || locks.length === 0">
+          清空本班锁定
         </el-button>
       </div>
     </div>
+
+    <el-alert v-if="selectedClassId && manualAssignments.length === 0" type="warning" :closable="false" style="margin-bottom: 20px">
+      该班级没有手动指定的授课分配，请先在"授课分配"页面进行手动指定。
+    </el-alert>
+
+    <el-alert v-else-if="selectedClassId" type="info" :closable="false" style="margin-bottom: 20px">
+      <div class="legend">
+        <span>点击单元格锁定课程时间：</span>
+        <span class="legend-item"><span class="cell-demo locked"></span> 已锁定</span>
+        <span class="legend-item"><span class="cell-demo special"></span> 特殊时段（不可编辑）</span>
+      </div>
+    </el-alert>
 
     <div v-if="selectedClassId" class="schedule-grid">
       <table border="1" cellspacing="0">
@@ -41,9 +53,7 @@
               <template v-else-if="getLock(dayIdx, period - 1)">
                 <div class="locked-cell">
                   <div class="subject-name">{{ getLock(dayIdx, period - 1).subject_name }}</div>
-                  <div class="teacher-name" v-if="getLock(dayIdx, period - 1).teacher_name">
-                    {{ getLock(dayIdx, period - 1).teacher_name }}
-                  </div>
+                  <div class="teacher-name">{{ getLock(dayIdx, period - 1).teacher_name }}</div>
                 </div>
               </template>
               <template v-else>
@@ -65,56 +75,48 @@
           {{ dayNames[editDay] }} 第{{ editPeriod + 1 }}节
         </el-form-item>
         <el-form-item label="课程" required>
-          <el-select v-model="editSubjectId" placeholder="选择课程" style="width: 100%;">
+          <el-select v-model="editAssignmentId" placeholder="选择已分配的课程" style="width: 100%;" @change="onAssignmentChange">
             <el-option
-              v-for="s in subjects"
-              :key="s.id"
-              :label="s.name"
-              :value="s.id"
+              v-for="a in manualAssignments"
+              :key="a.id"
+              :label="`${a.subject_name} - ${a.teacher_name}`"
+              :value="a.id"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item label="教师">
-          <el-select v-model="editTeacherId" clearable placeholder="留空使用授课分配" style="width: 100%;">
-            <el-option
-              v-for="t in teachers"
-              :key="t.id"
-              :label="t.name"
-              :value="t.id"
-            />
-          </el-select>
-          <div style="color: #909399; font-size: 12px; margin-top: 5px">
-            留空则自动使用授课分配中该班该课的教师
+          <div v-if="manualAssignments.length === 0" style="color: #f56c6c; font-size: 12px; margin-top: 5px">
+            没有手动指定的授课分配
           </div>
+        </el-form-item>
+        <el-form-item label="教师" v-if="selectedAssignment">
+          <el-input :value="selectedAssignment.teacher_name" disabled />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button v-if="hasExistingLock" type="danger" @click="handleDeleteLock">删除锁定</el-button>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveLock">确定</el-button>
+        <el-button type="primary" @click="handleSaveLock" :disabled="!editAssignmentId">确定</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 const classes = ref([])
-const subjects = ref([])
-const teachers = ref([])
 const selectedClassId = ref(null)
-const locks = ref([])  // 当前班级的锁定列表
+const locks = ref([])
+const assignments = ref([])  // 该班级的所有授课分配
 
 const dayNames = ['周一', '周二', '周三', '周四', '周五']
 const periodsPerDay = { 0: 6, 1: 6, 2: 6, 3: 6, 4: 4 }
 const maxPeriods = 6
 
 // 特殊时段
-const fridayClassMeeting = { day: 4, period: 3 }  // 周五第4节班会
-const combinedSlots = [  // 校本课程时段
+const fridayClassMeeting = { day: 4, period: 3 }
+const combinedSlots = [
   { day: 1, period: 4 }, { day: 1, period: 5 },
   { day: 3, period: 4 }, { day: 3, period: 5 }
 ]
@@ -123,14 +125,25 @@ const combinedSlots = [  // 校本课程时段
 const dialogVisible = ref(false)
 const editDay = ref(0)
 const editPeriod = ref(0)
-const editSubjectId = ref(null)
-const editTeacherId = ref(null)
+const editAssignmentId = ref(null)
 const hasExistingLock = ref(false)
+
+// 只显示手动指定的分配
+const manualAssignments = computed(() => {
+  return assignments.value.filter(a => a.is_manual)
+})
+
+// 当前选中的分配
+const selectedAssignment = computed(() => {
+  return assignments.value.find(a => a.id === editAssignmentId.value)
+})
 
 const loadBase = async () => {
   classes.value = await api.get('/classes/')
-  subjects.value = await api.get('/subjects/')
-  teachers.value = await api.get('/teachers/')
+}
+
+const onClassChange = async () => {
+  await Promise.all([loadLocks(), loadAssignments()])
 }
 
 const loadLocks = async () => {
@@ -141,6 +154,16 @@ const loadLocks = async () => {
   locks.value = await api.get(`/classes/${selectedClassId.value}/locks/`)
 }
 
+const loadAssignments = async () => {
+  if (!selectedClassId.value) {
+    assignments.value = []
+    return
+  }
+  // 获取该班级的授课分配
+  const all = await api.get('/class-subject-teachers/')
+  assignments.value = all.filter(a => a.school_class === selectedClassId.value)
+}
+
 const getLock = (day, period) => {
   return locks.value.find(l => l.day === day && l.period === period)
 }
@@ -148,7 +171,7 @@ const getLock = (day, period) => {
 const isSpecialSlot = (day, period) => {
   if (day === fridayClassMeeting.day && period === fridayClassMeeting.period) return true
   if (combinedSlots.some(s => s.day === day && s.period === period)) return true
-  if (day === 4 && period >= 4) return true  // 周五无5、6节
+  if (day === 4 && period >= 4) return true
   return false
 }
 
@@ -167,33 +190,48 @@ const getCellClass = (day, period) => {
 
 const handleCellClick = (day, period) => {
   if (isSpecialSlot(day, period)) return
+  if (manualAssignments.value.length === 0) {
+    ElMessage.warning('请先在"授课分配"页面进行手动指定')
+    return
+  }
+
   const existing = getLock(day, period)
   editDay.value = day
   editPeriod.value = period
+
   if (existing) {
-    editSubjectId.value = existing.subject
-    editTeacherId.value = existing.teacher
+    // 找到对应的分配
+    const matchingAssignment = assignments.value.find(
+      a => a.subject === existing.subject && a.teacher === existing.teacher
+    )
+    editAssignmentId.value = matchingAssignment?.id || null
     hasExistingLock.value = true
   } else {
-    editSubjectId.value = null
-    editTeacherId.value = null
+    editAssignmentId.value = null
     hasExistingLock.value = false
   }
   dialogVisible.value = true
 }
 
+const onAssignmentChange = () => {
+  // 选择分配后自动填充教师信息
+}
+
 const handleSaveLock = async () => {
-  if (!editSubjectId.value) {
+  if (!editAssignmentId.value) {
     ElMessage.warning('请选择课程')
     return
   }
+  const assignment = selectedAssignment.value
+  if (!assignment) return
+
   try {
     await api.post('/schedule-locks/set/', {
       school_class: selectedClassId.value,
       day: editDay.value,
       period: editPeriod.value,
-      subject: editSubjectId.value,
-      teacher: editTeacherId.value || null,
+      subject: assignment.subject,
+      teacher: assignment.teacher,
     })
     ElMessage.success('锁定成功')
     dialogVisible.value = false
@@ -221,9 +259,18 @@ const handleDeleteLock = async () => {
 }
 
 const handleClearAll = async () => {
-  await ElMessageBox.confirm('确定清空所有班级的课表锁定?', '提示', { type: 'warning' })
+  await ElMessageBox.confirm('确定清空该班级的所有课表锁定?', '提示', { type: 'warning' })
   try {
-    await api.delete('/schedule-locks/clear-all/')
+    // 逐个删除该班级的锁定
+    for (const lock of locks.value) {
+      await api.delete('/schedule-locks/delete/', {
+        data: {
+          school_class: selectedClassId.value,
+          day: lock.day,
+          period: lock.period,
+        }
+      })
+    }
     ElMessage.success('已清空')
     loadLocks()
   } catch (e) {
@@ -238,6 +285,26 @@ onMounted(loadBase)
 .page-container { background: #fff; padding: 20px; border-radius: 4px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .page-header h2 { margin: 0; }
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cell-demo {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  border: 1px solid #dcdfe6;
+}
+.cell-demo.locked { background: #e1f3d8; }
+.cell-demo.special { background: #f0f0f0; }
 
 .schedule-grid { overflow-x: auto; }
 .schedule-grid table { width: 100%; border-collapse: collapse; table-layout: fixed; }
