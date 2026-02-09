@@ -3,16 +3,11 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
-  base: '/',  // 使用根路径
-  build: {
-    outDir: 'dist',
-    assetsDir: 'assets',
-  },
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true
       }
     }

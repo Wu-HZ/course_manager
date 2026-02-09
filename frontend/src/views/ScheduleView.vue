@@ -165,7 +165,14 @@ const teacherChartOption = computed(() => {
         type: 'bar',
         stack: 'total',
         data: sorted.map(t => t.stats.meeting),
-        itemStyle: { color: '#e6a23c' }
+        itemStyle: { color: '#e6a23c' },
+        label: {
+          show: true,
+          position: 'top',
+          formatter: (params) => sorted[params.dataIndex].stats.total,
+          fontSize: 12,
+          color: '#606266'
+        }
       }
     ],
     legend: {

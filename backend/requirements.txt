@@ -4,4 +4,3 @@ django-cors-headers>=4.0
 ortools==9.8.3296
 whitenoise>=6.0
 numpy<2
-openpyxl>=3.0
