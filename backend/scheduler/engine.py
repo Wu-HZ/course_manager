@@ -576,6 +576,19 @@ class ScheduleEngine:
             self.teacher_assignments
         )
 
+        # H3.5: 用户锁定占用教师时间片
+        # 对于每个用户锁定的条目，该教师在该时间片不能再教其他课
+        for (class_id, day, period), lock_info in self.user_locks.items():
+            locked_teacher_id = lock_info['teacher_id']
+            if locked_teacher_id is None:
+                continue
+            # 遍历该教师的所有其他课程
+            for other_class_id, other_subject_id in self.teacher_assignments.get(locked_teacher_id, []):
+                key = (other_class_id, other_subject_id)
+                if key in self.schedule_vars and (day, period) in self.schedule_vars[key]:
+                    # 该时间片已被锁定，其他课程不能排在这里
+                    self.model.Add(self.schedule_vars[key][(day, period)] == 0)
+
         # H4: 禁排日
         add_day_off_constraint(
             self.model, self.schedule_vars,
