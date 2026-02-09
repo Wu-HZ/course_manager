@@ -193,11 +193,18 @@ const showDialog = (row = null) => {
 
 const handleSave = async () => {
   try {
+    // 处理空值：确保空字符串转为 null
+    const data = {
+      ...form.value,
+      travel_group: form.value.travel_group || null,
+      combined_class_group: form.value.combined_class_group || null,
+      combined_class_day: form.value.combined_class_day || null,
+    }
     if (editingId.value) {
-      await updateTeacher(editingId.value, form.value)
+      await updateTeacher(editingId.value, data)
       ElMessage.success('更新成功')
     } else {
-      await createTeacher(form.value)
+      await createTeacher(data)
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
