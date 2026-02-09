@@ -35,7 +35,13 @@
 
     <el-card v-if="entries.length" class="timetable-card">
       <template #header>
-        <span>{{ currentTargetName }} 课表</span>
+        <div class="timetable-header">
+          <span>{{ currentTargetName }} 课表</span>
+          <span class="weekly-hours">
+            周课时 {{ weeklyHoursStats.total }}
+            （普通课程 {{ weeklyHoursStats.normal }} + 校本课程 {{ weeklyHoursStats.combined }} + 班会课 {{ weeklyHoursStats.meeting }}）
+          </span>
+        </div>
       </template>
       <TimetableGrid
         :entries="entries"
@@ -93,6 +99,25 @@ const combinedAssignmentsList = computed(() => {
     teachers: teacherList,
     count: teacherList.length
   }))
+})
+
+// 计算周课时统计
+const weeklyHoursStats = computed(() => {
+  const total = entries.value.length
+  let meeting = 0    // 班会课：周五第4节 (day=4, period=3)
+  let combined = 0   // 校本课程：teacher为null的条目
+
+  for (const e of entries.value) {
+    if (e.day === 4 && e.period === 3) {
+      meeting++
+    } else if (e.teacher === null || e.teacher_name === null) {
+      combined++
+    }
+  }
+
+  const normal = total - meeting - combined
+
+  return { total, normal, combined, meeting }
 })
 
 const loadData = async () => {
@@ -158,4 +183,14 @@ onMounted(async () => {
 .filter-card { margin-bottom: 20px; }
 .timetable-card { margin-top: 20px; }
 .combined-card { margin-top: 20px; }
+.timetable-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.weekly-hours {
+  font-size: 14px;
+  color: #606266;
+  font-weight: normal;
+}
 </style>
