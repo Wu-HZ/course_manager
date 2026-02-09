@@ -3,15 +3,15 @@
     <table>
       <thead>
         <tr>
-          <th class="time-col">节次</th>
-          <th v-for="day in days" :key="day.key">{{ day.label }}</th>
+          <th class="day-col"></th>
+          <th v-for="period in maxPeriods" :key="period">第{{ period }}节</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="period in maxPeriods" :key="period">
-          <td class="time-col">第{{ period }}节</td>
+        <tr v-for="day in days" :key="day.key">
+          <td class="day-col">{{ day.label }}</td>
           <td
-            v-for="day in days"
+            v-for="period in maxPeriods"
             :key="`${day.key}-${period}`"
             :class="getCellClass(day.index, period - 1)"
           >
@@ -80,8 +80,8 @@ const getCellClass = (day, period) => {
   border: 1px solid #dcdfe6;
   padding: 8px;
   text-align: center;
-  min-width: 100px;
-  height: 60px;
+  min-width: 90px;
+  height: 70px;
 }
 
 .timetable-grid th {
@@ -89,9 +89,10 @@ const getCellClass = (day, period) => {
   font-weight: bold;
 }
 
-.time-col {
-  width: 80px;
+.day-col {
+  width: 60px;
   background: #f5f7fa !important;
+  font-weight: bold;
 }
 
 .cell-content {
