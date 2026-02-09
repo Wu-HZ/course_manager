@@ -109,15 +109,23 @@ def teacher_timetable(request, result_id, teacher_id):
 
         if not teacher.exclude_from_combined:
             # 从排课结果中获取分组信息
+            # 格式: {"分组名": {"周二": ["教师名"], "周四": ["教师名"]}, ...}
             combined_assignments = result.combined_class_assignments or {}
             teacher_name = teacher.name
 
-            # 检查教师在哪个组
+            # 查找教师在哪个分组的哪个日期
             assigned_day = None
-            if "周二组" in combined_assignments and teacher_name in combined_assignments["周二组"]:
-                assigned_day = 1  # 周二
-            elif "周四组" in combined_assignments and teacher_name in combined_assignments["周四组"]:
-                assigned_day = 3  # 周四
+            assigned_group = None
+            for group_name, day_data in combined_assignments.items():
+                if isinstance(day_data, dict):
+                    if teacher_name in day_data.get("周二", []):
+                        assigned_day = 1  # 周二
+                        assigned_group = group_name
+                        break
+                    elif teacher_name in day_data.get("周四", []):
+                        assigned_day = 3  # 周四
+                        assigned_group = group_name
+                        break
 
             if assigned_day is not None:
                 # 获取校本课程时段
@@ -132,7 +140,7 @@ def teacher_timetable(request, result_id, teacher_id):
                                 'id': None,
                                 'day': day,
                                 'period': period,
-                                'subject_name': '校本课程',
+                                'subject_name': f'校本课程({assigned_group})',
                                 'school_class_name': '(全年级)',
                                 'teacher_name': teacher_name,
                                 'is_locked': True,

@@ -412,98 +412,108 @@ class ScheduleEngine:
                     self.model.NewBoolVar(var_name)
 
     def assign_combined_class_teachers(self):
-        """分配校本课程教师到周二组和周四组
+        """分配校本课程教师到4个分组，并进一步分为周二组和周四组
 
         规则：
-        1. 将教师分为周二组和周四组
+        1. 使用手动指定的教师（Teacher.combined_class_group）
         2. 排除标记为"不参与"的教师（Teacher.exclude_from_combined）
-        3. 检查教师禁排日，周二禁排的不能分到周二组，周四禁排的不能分到周四组
-        4. 均衡分配教师到两组
+        3. 将未指定的教师随机分配到需要更多人的组
+        4. 每个分组内的教师再分为周二和周四两组
 
         Returns:
             dict: {
-                "tuesday": [teacher_id, ...],
-                "thursday": [teacher_id, ...]
+                group_id: {
+                    "tuesday": [teacher_id, ...],
+                    "thursday": [teacher_id, ...]
+                }
             }
         """
         if not self.combined_subject:
             return {}
 
+        from core.models import CombinedClassGroup
         import random
 
-        # 收集可参与校本课程的教师
-        tuesday_available = []  # 可以分到周二组的教师
-        thursday_available = []  # 可以分到周四组的教师
+        # 获取所有分组
+        groups = list(CombinedClassGroup.objects.all().order_by('id'))
+        if len(groups) < 4:
+            self.errors.append(f"校本课程分组不足: 需要4个, 当前{len(groups)}个")
+            return {}
 
+        # 初始化每组的教师列表
+        group_teachers = {g.id: [] for g in groups}
+
+        # 1. 处理手动指定的教师
         for tid, teacher in self.teachers.items():
             if teacher.exclude_from_combined:
                 continue  # 跳过排除的教师
+            if teacher.combined_class_group_id:
+                gid = teacher.combined_class_group_id
+                if gid in group_teachers:
+                    group_teachers[gid].append(tid)
 
-            day_off = self.teacher_day_off.get(tid)
+        # 2. 收集未指定且未排除的教师
+        unassigned = []
+        for tid, teacher in self.teachers.items():
+            if teacher.exclude_from_combined:
+                continue
+            if teacher.combined_class_group_id:
+                continue  # 已手动指定
+            unassigned.append(tid)
 
-            # 周二 = 1, 周四 = 3
-            can_tuesday = (day_off != 1)  # 禁排日不是周二
-            can_thursday = (day_off != 3)  # 禁排日不是周四
+        # 3. 随机分配未指定的教师到需要人的组
+        random.shuffle(unassigned)
+        for tid in unassigned:
+            # 找到教师最少的组
+            min_group = min(group_teachers.keys(), key=lambda g: len(group_teachers[g]))
+            group_teachers[min_group].append(tid)
 
-            if can_tuesday:
-                tuesday_available.append(tid)
-            if can_thursday:
-                thursday_available.append(tid)
+        # 4. 检查每组是否至少有一位教师
+        for g in groups:
+            if not group_teachers[g.id]:
+                self.errors.append(f"校本课程分组 '{g.name}' 没有可用教师")
 
-        # 随机打乱
-        random.shuffle(tuesday_available)
-        random.shuffle(thursday_available)
+        # 5. 每个分组内的教师再分为周二和周四
+        result = {}
+        for group_id, teacher_ids in group_teachers.items():
+            tuesday_list = []
+            thursday_list = []
 
-        # 分配策略：尽量均衡，且每组至少1人
-        tuesday_group = []
-        thursday_group = []
-        assigned = set()
+            for tid in teacher_ids:
+                day_off = self.teacher_day_off.get(tid)
+                can_tuesday = (day_off != 1)
+                can_thursday = (day_off != 3)
 
-        # 先分配只能去一个组的教师
-        for tid in tuesday_available:
-            if tid not in thursday_available:
-                tuesday_group.append(tid)
-                assigned.add(tid)
+                if can_tuesday and not can_thursday:
+                    tuesday_list.append(tid)
+                elif can_thursday and not can_tuesday:
+                    thursday_list.append(tid)
+                else:
+                    # 可以去任意组，分到人少的组
+                    if len(tuesday_list) <= len(thursday_list):
+                        tuesday_list.append(tid)
+                    else:
+                        thursday_list.append(tid)
 
-        for tid in thursday_available:
-            if tid not in tuesday_available:
-                thursday_group.append(tid)
-                assigned.add(tid)
+            result[group_id] = {
+                "tuesday": tuesday_list,
+                "thursday": thursday_list
+            }
 
-        # 剩余可以去任意组的教师，均衡分配
-        flexible = [tid for tid in tuesday_available if tid in thursday_available and tid not in assigned]
-        random.shuffle(flexible)
+        return result
 
-        for tid in flexible:
-            if len(tuesday_group) <= len(thursday_group):
-                tuesday_group.append(tid)
-            else:
-                thursday_group.append(tid)
+    def generate_rotation_table(self, group_teachers):
+        """生成班级轮换表
 
-        # 检查每组是否至少有一位教师
-        if not tuesday_group:
-            self.errors.append("校本课程周二组没有可用教师（检查教师禁排日设置）")
-        if not thursday_group:
-            self.errors.append("校本课程周四组没有可用教师（检查教师禁排日设置）")
-
-        return {
-            "tuesday": tuesday_group,
-            "thursday": thursday_group
-        }
-
-    def generate_rotation_table(self, day_groups):
-        """生成班级轮换表（已简化为周二/周四分组）
-
-        此方法已简化，不再生成复杂轮换表。
-        校本课程采用简单的周二组/周四组分配。
+        此方法保留用于兼容性，返回原始数据。
 
         Args:
-            day_groups: {"tuesday": [teacher_ids], "thursday": [teacher_ids]}
+            group_teachers: 分组数据
 
         Returns:
-            dict: 同 day_groups，保持兼容性
+            dict: 同输入数据
         """
-        return day_groups
+        return group_teachers
 
     def add_locked_entries(self):
         """添加预锁定条目 (班会课 + 校本课程)"""
@@ -956,8 +966,23 @@ class ScheduleEngine:
         if not self.combined_subject:
             diagnostics.append("  未配置校本课程")
         else:
+            from core.models import CombinedClassGroup
+            groups = list(CombinedClassGroup.objects.all())
+
             diagnostics.append(f"  - 校本课程: {self.combined_subject.name}")
             diagnostics.append(f"  - 锁定时段: {len(self.combined_slots)}个 ({self.settings.combined_class_slots})")
+            diagnostics.append(f"  - 分组数量: {len(groups)}个")
+
+            if len(groups) < 4:
+                diagnostics.append(f"[错误] 校本课程分组不足，需要4个")
+
+            # 统计各组情况
+            for group in groups:
+                manual = []
+                for tid, t in self.teachers.items():
+                    if t.combined_class_group_id == group.id and not t.exclude_from_combined:
+                        manual.append(t.name)
+                diagnostics.append(f"  - {group.name}: {', '.join(manual) if manual else '(待自动分配)'}")
 
             # 统计可用教师
             tuesday_available = []
@@ -975,8 +1000,8 @@ class ScheduleEngine:
                 if day_off != 3:  # 可以周四
                     thursday_available.append(t.name)
 
-            diagnostics.append(f"  - 周二组可用: {len(tuesday_available)}人 ({', '.join(tuesday_available[:5])}{'...' if len(tuesday_available) > 5 else ''})")
-            diagnostics.append(f"  - 周四组可用: {len(thursday_available)}人 ({', '.join(thursday_available[:5])}{'...' if len(thursday_available) > 5 else ''})")
+            diagnostics.append(f"  - 可上周二: {len(tuesday_available)}人")
+            diagnostics.append(f"  - 可上周四: {len(thursday_available)}人")
 
             if excluded:
                 diagnostics.append(f"  - 不参与: {', '.join(excluded)}")
@@ -1045,27 +1070,39 @@ class ScheduleEngine:
                 }
             )
 
-    def save_combined_class_assignments(self, day_groups):
+    def save_combined_class_assignments(self, group_data):
         """将校本课程分组分配结果转换为可保存的格式
 
         Args:
-            day_groups: {"tuesday": [teacher_ids], "thursday": [teacher_ids]}
+            group_data: {group_id: {"tuesday": [teacher_ids], "thursday": [teacher_ids]}}
 
         Returns:
-            dict: {"周二组": ["教师名1", ...], "周四组": ["教师名1", ...]}
+            dict: {
+                "分组名": {
+                    "周二": ["教师名1", ...],
+                    "周四": ["教师名2", ...]
+                }, ...
+            }
         """
-        if not day_groups:
+        if not group_data:
             return {}
 
+        from core.models import CombinedClassGroup
+
+        # 获取分组名称
+        groups = {g.id: g.name for g in CombinedClassGroup.objects.all()}
+
         result = {}
+        for group_id, day_data in group_data.items():
+            group_name = groups.get(group_id, f"分组{group_id}")
 
-        if "tuesday" in day_groups:
-            teacher_names = [self.teachers[tid].name for tid in day_groups["tuesday"] if tid in self.teachers]
-            result["周二组"] = teacher_names
+            tuesday_names = [self.teachers[tid].name for tid in day_data.get("tuesday", []) if tid in self.teachers]
+            thursday_names = [self.teachers[tid].name for tid in day_data.get("thursday", []) if tid in self.teachers]
 
-        if "thursday" in day_groups:
-            teacher_names = [self.teachers[tid].name for tid in day_groups["thursday"] if tid in self.teachers]
-            result["周四组"] = teacher_names
+            result[group_name] = {
+                "周二": tuesday_names,
+                "周四": thursday_names
+            }
 
         return result
 

@@ -60,13 +60,23 @@
       </template>
       <el-table :data="combinedAssignmentsList" stripe border>
         <el-table-column prop="groupName" label="分组" width="120" />
-        <el-table-column prop="dayLabel" label="上课日期" width="120" />
-        <el-table-column prop="teachers" label="分配教师">
+        <el-table-column label="周二">
           <template #default="{ row }">
-            <el-tag v-for="t in row.teachers" :key="t" style="margin-right: 5px;">{{ t }}</el-tag>
+            <el-tag v-for="t in row.tuesday" :key="t" style="margin-right: 5px;">{{ t }}</el-tag>
+            <span v-if="!row.tuesday.length" style="color: #909399">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="count" label="人数" width="80" align="center" />
+        <el-table-column label="周四">
+          <template #default="{ row }">
+            <el-tag v-for="t in row.thursday" :key="t" style="margin-right: 5px;">{{ t }}</el-tag>
+            <span v-if="!row.thursday.length" style="color: #909399">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="合计" width="80" align="center">
+          <template #default="{ row }">
+            {{ row.tuesday.length + row.thursday.length }}
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>
@@ -167,16 +177,23 @@ const teacherChartOption = computed(() => {
 
 // 转换为表格数据格式
 const combinedAssignmentsList = computed(() => {
-  const dayLabels = {
-    '周二组': '周二下午',
-    '周四组': '周四下午'
-  }
-  return Object.entries(combinedAssignments.value).map(([groupName, teacherList]) => ({
-    groupName,
-    dayLabel: dayLabels[groupName] || groupName,
-    teachers: teacherList,
-    count: teacherList.length
-  }))
+  // 新格式: {"分组名": {"周二": ["教师"], "周四": ["教师"]}, ...}
+  return Object.entries(combinedAssignments.value).map(([groupName, dayData]) => {
+    // 兼容新旧格式
+    if (typeof dayData === 'object' && !Array.isArray(dayData)) {
+      return {
+        groupName,
+        tuesday: dayData['周二'] || [],
+        thursday: dayData['周四'] || []
+      }
+    }
+    // 旧格式兼容（数组形式）
+    return {
+      groupName,
+      tuesday: dayData || [],
+      thursday: []
+    }
+  })
 })
 
 // 计算单个课表的周课时统计
@@ -191,7 +208,7 @@ const calcStats = (entries) => {
     } else if (
       e.teacher === null ||
       e.teacher_name === null ||
-      e.subject_name === '校本课程' ||
+      (e.subject_name && e.subject_name.startsWith('校本课程')) ||
       e.school_class_name === '(全年级)'
     ) {
       combined++
