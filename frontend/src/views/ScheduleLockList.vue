@@ -281,7 +281,11 @@ const handleCellClick = async (day, period) => {
         teacher: assignment.teacher,
       })
       ElMessage.success('锁定成功')
-      loadLocks()
+      await loadLocks()
+      // 如果当前选中的课程已满，清除选中状态
+      if (selectedAssignment.value && isSubjectFull(selectedAssignment.value)) {
+        selectedAssignmentId.value = null
+      }
     } catch (e) {
       ElMessage.error('操作失败')
     }
@@ -441,6 +445,15 @@ onMounted(loadBase)
   opacity: 0.5;
   cursor: not-allowed;
   background: #f5f5f5;
+  color: #606266;
+}
+
+.course-item.disabled .course-teacher {
+  color: #909399;
+}
+
+.course-item.disabled .course-status span {
+  color: #f56c6c;
 }
 
 .course-item.disabled:hover {
