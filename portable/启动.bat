@@ -20,13 +20,15 @@ if not exist "python\python.exe" (
 :: 设置环境变量
 set DJANGO_DEBUG=false
 set SERVE_FRONTEND=true
+set PYTHONPATH=%~dp0backend
 set PATH=%~dp0python;%~dp0python\Scripts;%PATH%
 
 :: 检查数据库，如果不存在则初始化
 if not exist "data\db.sqlite3" (
     echo [首次运行] 正在初始化数据库...
     mkdir data 2>nul
-    python\python.exe backend\manage.py migrate --run-syncdb
+    set DB_PATH=%~dp0data\db.sqlite3
+    python\python.exe -m django migrate --settings=config.settings --run-syncdb
     if errorlevel 1 (
         echo [错误] 数据库初始化失败！
         pause
@@ -50,9 +52,9 @@ echo ========================================
 echo.
 
 :: 延迟2秒后打开浏览器
-start "" cmd /c "timeout /t 2 /nobreak >nul && start http://127.0.0.1:8000"
+start "" cmd /c "timeout /t 2 /nobreak >nul && start http://127.0.0.1:8080"
 
 :: 启动 Django 服务器
-python\python.exe backend\manage.py runserver 127.0.0.1:8000 --noreload
+python\python.exe -m django runserver 127.0.0.1:8080 --settings=config.settings --noreload
 
 pause
