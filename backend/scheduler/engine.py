@@ -166,6 +166,67 @@ class ScheduleEngine:
                     f"教师 '{teacher_name}' 手动分配了多门主课: {', '.join(sub_names)}"
                 )
 
+        # === 优先处理班主任的主课分配 ===
+        # 收集需要分配主课的班主任
+        homeroom_needs_main = []  # [(class_id, teacher_id)]
+        for class_id, school_class in self.classes.items():
+            hr_teacher_id = school_class.homeroom_teacher_id
+            if not hr_teacher_id:
+                continue
+            # 检查该班主任是否已在该班有主课分配
+            has_main = False
+            for sid in teacher_class_subjects[hr_teacher_id][class_id]:
+                if sid in self.subjects and self.subjects[sid].is_main_subject:
+                    has_main = True
+                    break
+            if not has_main:
+                homeroom_needs_main.append((class_id, hr_teacher_id))
+
+        # 优先为班主任分配主课
+        for class_id, hr_teacher_id in homeroom_needs_main:
+            # 找到该班需要分配的主课
+            available_main_subjects = []
+            for (c_id, s_id) in needs_assignment:
+                if c_id != class_id:
+                    continue
+                subject = self.subjects[s_id]
+                if not subject.is_main_subject:
+                    continue
+                # 检查班主任是否有该课的资质
+                if hr_teacher_id not in self.qualifications.get(s_id, []):
+                    continue
+                # 检查是否已有其他主课分配给该教师
+                if teacher_main_subjects[hr_teacher_id]:
+                    continue
+                # 检查课时上限
+                teacher = self.teachers[hr_teacher_id]
+                new_load = teacher_load[hr_teacher_id] + subject.weekly_hours
+                if teacher.max_weekly_hours is not None and new_load > teacher.max_weekly_hours:
+                    continue
+                # 检查单科多班限制
+                if teacher_subject_count[hr_teacher_id][s_id] >= subject.max_teacher_classes:
+                    continue
+                available_main_subjects.append(s_id)
+
+            if available_main_subjects:
+                # 随机选一门主课分配给班主任
+                chosen_subject_id = random.choice(available_main_subjects)
+                subject = self.subjects[chosen_subject_id]
+                key = (class_id, chosen_subject_id)
+
+                self.class_subject_teacher[key] = hr_teacher_id
+                teacher_load[hr_teacher_id] += subject.weekly_hours
+                teacher_subject_count[hr_teacher_id][chosen_subject_id] += 1
+                teacher_class_subjects[hr_teacher_id][class_id].add(chosen_subject_id)
+                teacher_main_subjects[hr_teacher_id].add(chosen_subject_id)
+                self.auto_assigned.append({
+                    'class_id': class_id,
+                    'subject_id': chosen_subject_id,
+                    'teacher_id': hr_teacher_id
+                })
+                # 从待分配列表移除
+                needs_assignment.remove(key)
+
         random.shuffle(needs_assignment)
 
         for class_id, subject_id in needs_assignment:
@@ -272,6 +333,25 @@ class ScheduleEngine:
                         f"教师 '{teacher.name}' 要求至少 {teacher.min_weekly_hours} 节课时，"
                         f"但只能分配 {actual_hours} 节（请检查该教师的资质设置或增加可授课程）"
                     )
+
+        # 检查班主任是否在其班级担任主课
+        for class_id, school_class in self.classes.items():
+            hr_teacher_id = school_class.homeroom_teacher_id
+            if not hr_teacher_id:
+                continue
+            # 检查该班主任是否在该班有主课
+            has_main = False
+            for (c_id, s_id), t_id in self.class_subject_teacher.items():
+                if c_id == class_id and t_id == hr_teacher_id:
+                    if self.subjects[s_id].is_main_subject:
+                        has_main = True
+                        break
+            if not has_main:
+                teacher_name = self.teachers[hr_teacher_id].name
+                self.errors.append(
+                    f"班主任 '{teacher_name}' 必须在 {school_class.name} 担任至少一门主课"
+                    f"（请为该教师添加主课资质或手动分配）"
+                )
 
         # 检查是否有分配失败
         if self.errors:
