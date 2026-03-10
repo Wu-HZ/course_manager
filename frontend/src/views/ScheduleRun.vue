@@ -6,15 +6,15 @@
       <template #header>排课参数</template>
       <el-form label-width="140px">
         <el-form-item label="单次求解时限(秒)">
-          <el-input-number v-model="timeLimit" :min="10" :max="300" />
+          <el-input-number v-model="timeLimit" :min="10" :max="1500" />
           <span class="form-hint">每次求解尝试的时间限制</span>
         </el-form-item>
         <el-form-item label="最大尝试次数">
-          <el-input-number v-model="maxAttempts" :min="1" :max="50" />
+          <el-input-number v-model="maxAttempts" :min="1" :max="250" />
           <span class="form-hint">自动重试的最大次数</span>
         </el-form-item>
         <el-form-item label="总超时时间(秒)">
-          <el-input-number v-model="totalTimeout" :min="30" :max="600" />
+          <el-input-number v-model="totalTimeout" :min="30" :max="3000" />
           <span class="form-hint">所有尝试的总时间上限</span>
         </el-form-item>
         <el-form-item>
@@ -127,9 +127,9 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { runSchedule as runScheduleApi, getScheduleResults, activateResult as activateApi } from '../api/scheduler'
 
-const timeLimit = ref(60)
-const maxAttempts = ref(10)
-const totalTimeout = ref(120)
+const timeLimit = ref(300)
+const maxAttempts = ref(50)
+const totalTimeout = ref(600)
 const running = ref(false)
 const result = ref(null)
 const errors = ref([])

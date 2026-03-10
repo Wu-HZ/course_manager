@@ -1270,7 +1270,7 @@ class ScheduleEngine:
         }
 
 
-def run_scheduler(time_limit_seconds=60, max_attempts=10, total_timeout_seconds=120):
+def run_scheduler(time_limit_seconds=300, max_attempts=50, total_timeout_seconds=600):
     """
     便捷函数: 运行排课
 

@@ -2,9 +2,9 @@ import api from './index'
 
 export const runSchedule = (params = {}) => {
   const data = {
-    time_limit_seconds: params.timeLimit || 60,
-    max_attempts: params.maxAttempts || 10,
-    total_timeout_seconds: params.totalTimeout || 120,
+    time_limit_seconds: params.timeLimit || 300,
+    max_attempts: params.maxAttempts || 50,
+    total_timeout_seconds: params.totalTimeout || 600,
   }
   return api.post('/scheduler/run/', data)
 }

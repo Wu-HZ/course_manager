@@ -11,9 +11,9 @@ from .engine import run_scheduler
 @api_view(['POST'])
 def run_schedule(request):
     """触发排课（支持自动重试）"""
-    time_limit = request.data.get('time_limit_seconds', 60)
-    max_attempts = request.data.get('max_attempts', 10)
-    total_timeout = request.data.get('total_timeout_seconds', 120)
+    time_limit = request.data.get('time_limit_seconds', 300)
+    max_attempts = request.data.get('max_attempts', 50)
+    total_timeout = request.data.get('total_timeout_seconds', 600)
 
     result = run_scheduler(
         time_limit_seconds=time_limit,
