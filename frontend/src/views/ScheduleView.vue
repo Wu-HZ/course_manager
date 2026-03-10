@@ -20,6 +20,9 @@
             <el-radio-button value="teacher">按教师</el-radio-button>
           </el-radio-group>
         </el-form-item>
+        <el-form-item>
+          <el-button type="success" :disabled="!allTimetables.length" @click="exportToExcel">导出 Excel</el-button>
+        </el-form-item>
       </el-form>
     </el-card>
 
@@ -28,12 +31,12 @@
       <template #header>
         <span>教师课时分布</span>
       </template>
-      <v-chart :option="teacherChartOption" style="height: 300px;" autoresize />
+      <v-chart :option="teacherChartOption" style="height: 300px; cursor: pointer;" autoresize @click="onChartClick" />
     </el-card>
 
     <!-- 所有课表 -->
     <template v-if="allTimetables.length">
-      <el-card v-for="item in allTimetables" :key="item.id" class="timetable-card">
+      <el-card v-for="item in allTimetables" :key="item.id" :ref="el => setTimetableRef(item.id, el)" class="timetable-card">
         <template #header>
           <div class="timetable-header">
             <span>{{ item.name }} 课表</span>
@@ -106,6 +109,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import * as XLSX from 'xlsx'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { BarChart } from 'echarts/charts'
@@ -128,13 +132,26 @@ const viewType = ref('class')
 const allTimetables = ref([])
 const combinedAssignments = ref({})
 const travelGroups = ref([])
+const timetableRefs = {}
+
+const setTimetableRef = (id, el) => {
+  if (el) {
+    timetableRefs[id] = el
+  } else {
+    delete timetableRefs[id]
+  }
+}
 
 const targets = computed(() => viewType.value === 'class' ? classes.value : teachers.value)
 
+// 按课时量从大到小排序（图表用）
+const sortedTimetables = computed(() =>
+  [...allTimetables.value].sort((a, b) => b.stats.total - a.stats.total)
+)
+
 // 教师课时柱状图配置
 const teacherChartOption = computed(() => {
-  // 按课时量从大到小排序
-  const sorted = [...allTimetables.value].sort((a, b) => b.stats.total - a.stats.total)
+  const sorted = sortedTimetables.value
 
   return {
     tooltip: {
@@ -205,6 +222,17 @@ const teacherChartOption = computed(() => {
     }
   }
 })
+
+// 点击柱状图跳转到对应教师课表
+const onChartClick = (params) => {
+  const sorted = sortedTimetables.value
+  const item = sorted[params.dataIndex]
+  if (!item) return
+  const el = timetableRefs[item.id]
+  if (el?.$el) {
+    el.$el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
 
 // 转换为表格数据格式
 const combinedAssignmentsList = computed(() => {
@@ -319,6 +347,53 @@ const loadAllTimetables = async () => {
   })
 
   allTimetables.value = await Promise.all(promises)
+}
+
+const exportToExcel = () => {
+  const wb = XLSX.utils.book_new()
+  const dayLabels = ['周一', '周二', '周三', '周四', '周五']
+  const periodsPerDay = { 0: 6, 1: 6, 2: 6, 3: 6, 4: 4 }
+  const maxPeriods = 6
+  const header = ['', '第1节', '第2节', '第3节', '第4节', '第5节', '第6节']
+
+  for (const item of allTimetables.value) {
+    const entryMap = {}
+    for (const e of item.entries) {
+      entryMap[`${e.day}-${e.period}`] = e
+    }
+
+    const rows = [header]
+    for (let day = 0; day < 5; day++) {
+      const row = [dayLabels[day]]
+      for (let period = 0; period < maxPeriods; period++) {
+        const entry = entryMap[`${day}-${period}`]
+        if (entry) {
+          const line1 = entry.subject_name || ''
+          const line2 = viewType.value === 'class'
+            ? (entry.teacher_name || '')
+            : (entry.school_class_name || '')
+          row.push(line2 ? `${line1}\n${line2}` : line1)
+        } else if (period >= periodsPerDay[day]) {
+          row.push('-')
+        } else {
+          row.push('')
+        }
+      }
+      rows.push(row)
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    // 设置列宽
+    ws['!cols'] = [
+      { wch: 6 },
+      ...Array(maxPeriods).fill({ wch: 14 })
+    ]
+    const sheetName = item.name.substring(0, 31) // Excel sheet 名最长 31 字符
+    XLSX.utils.book_append_sheet(wb, ws, sheetName)
+  }
+
+  const viewLabel = viewType.value === 'class' ? '按班级' : '按教师'
+  XLSX.writeFile(wb, `课表_${viewLabel}_#${selectedResult.value}.xlsx`)
 }
 
 onMounted(async () => {
