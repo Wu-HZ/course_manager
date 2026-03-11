@@ -225,6 +225,11 @@ def import_data(request):
                             fk_field_name = fk_info[0]
                             data[fk_field_name] = None
                     else:
+                        # 空值使用模型字段默认值
+                        if value is None:
+                            model_field = model._meta.get_field(field)
+                            if model_field.has_default():
+                                value = model_field.default
                         data[field] = value
                         # 用第一个非外键字段作为查找字段
                         if lookup_field is None and value:
