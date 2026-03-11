@@ -65,6 +65,11 @@ const routes = [
     path: '/scheduler-settings',
     name: 'SchedulerSettings',
     component: () => import('../views/SchedulerSettings.vue')
+  },
+  {
+    path: '/observation-assignment',
+    name: 'ObservationAssignment',
+    component: () => import('../views/ObservationAssignment.vue')
   }
 ]
 

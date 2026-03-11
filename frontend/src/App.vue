@@ -42,6 +42,10 @@
           <el-icon><Calendar /></el-icon>
           <span>课表查看</span>
         </el-menu-item>
+        <el-menu-item index="/observation-assignment">
+          <el-icon><Notebook /></el-icon>
+          <span>听课分配</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-main>
