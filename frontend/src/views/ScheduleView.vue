@@ -22,6 +22,7 @@
         </el-form-item>
         <el-form-item>
           <el-button type="success" :disabled="!allTimetables.length" @click="exportToExcel">导出 Excel</el-button>
+          <el-button type="primary" :disabled="!allTimetables.length" @click="exportToJSON">导出数据 (JSON)</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -119,7 +120,8 @@ import TimetableGrid from '../components/TimetableGrid.vue'
 import { getScheduleResults, getClassTimetable, getTeacherTimetable } from '../api/scheduler'
 import { getClasses } from '../api/classes'
 import { getTeachers } from '../api/teachers'
-import { getTravelGroups } from '../api/resources'
+import { getTravelGroups, getAssignments } from '../api/resources'
+import { getSubjects } from '../api/subjects'
 
 // 注册 ECharts 组件
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
@@ -394,6 +396,112 @@ const exportToExcel = () => {
 
   const viewLabel = viewType.value === 'class' ? '按班级' : '按教师'
   XLSX.writeFile(wb, `课表_${viewLabel}_#${selectedResult.value}.xlsx`)
+}
+
+const exportToJSON = async () => {
+  const [subjects, assignments] = await Promise.all([
+    getSubjects(),
+    getAssignments()
+  ])
+
+  // 汇总所有班级的课表条目（按班级维度，去重完整）
+  const classTimetables = viewType.value === 'class'
+    ? allTimetables.value
+    : await Promise.all(
+        classes.value.map(async (c) => {
+          try {
+            const entries = await getClassTimetable(selectedResult.value, c.id)
+            return { id: c.id, name: c.name, entries }
+          } catch { return { id: c.id, name: c.name, entries: [] } }
+        })
+      )
+
+  // 合并所有 entries，用 set 去重（同一个 entry 可能出现在班级和教师视图中）
+  const allEntries = []
+  const seen = new Set()
+  for (const t of classTimetables) {
+    for (const e of t.entries) {
+      const key = `${e.day}-${e.period}-${e.school_class ?? t.id}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        allEntries.push({
+          day: e.day,
+          period: e.period,
+          classId: e.school_class,
+          className: e.school_class_name,
+          teacherId: e.teacher,
+          teacherName: e.teacher_name,
+          subjectId: e.subject,
+          subjectName: e.subject_name,
+          isLocked: e.is_locked || false
+        })
+      }
+    }
+  }
+
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    resultId: selectedResult.value,
+    classes: classes.value.map(c => ({
+      id: c.id,
+      name: c.name,
+      grade: c.grade,
+      homeroomTeacherId: c.homeroom_teacher,
+      homeroomTeacherName: c.homeroom_teacher_name
+    })),
+    teachers: teachers.value.map(t => ({
+      id: t.id,
+      name: t.name,
+      travelGroup: t.travel_group,
+      travelGroupName: t.travel_group_name,
+      combinedClassGroup: t.combined_class_group,
+      combinedClassGroupName: t.combined_class_group_name,
+      combinedClassDay: t.combined_class_day,
+      excludeFromCombined: t.exclude_from_combined,
+      minWeeklyHours: t.min_weekly_hours,
+      maxWeeklyHours: t.max_weekly_hours
+    })),
+    subjects: subjects.map(s => ({
+      id: s.id,
+      name: s.name,
+      weeklyHours: s.weekly_hours,
+      isAmPreferred: s.is_am_preferred,
+      allowConsecutive: s.allow_consecutive,
+      maxDailyLimit: s.max_daily_limit,
+      locationType: s.location_type,
+      isCombinedClass: s.is_combined_class,
+      applicableGrades: s.applicable_grades,
+      avoidFirstPeriod: s.avoid_first_period,
+      isMainSubject: s.is_main_subject,
+      maxTeacherClasses: s.max_teacher_classes
+    })),
+    assignments: assignments.map(a => ({
+      id: a.id,
+      classId: a.school_class,
+      className: a.school_class_name,
+      subjectId: a.subject,
+      subjectName: a.subject_name,
+      teacherId: a.teacher,
+      teacherName: a.teacher_name
+    })),
+    travelGroups: travelGroups.value.map(g => ({
+      id: g.id,
+      name: g.name,
+      dayOff: g.day_off,
+      dayOffDisplay: g.day_off_display
+    })),
+    combinedAssignments: combinedAssignments.value,
+    entries: allEntries
+  }
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `课表数据_#${selectedResult.value}.json`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 onMounted(async () => {
