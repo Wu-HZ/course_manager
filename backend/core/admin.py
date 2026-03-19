@@ -2,7 +2,8 @@ from django.contrib import admin
 from .models import (
     TravelGroup, Subject, CombinedClassGroup, Teacher,
     SchoolClass, Location, ClassSubjectTeacher,
-    TeacherQualification, ScheduleLock, SchedulerSettings
+    TeacherQualification, ScheduleLock, SchedulerSettings,
+    TeacherBlockedTime
 )
 
 
@@ -96,3 +97,10 @@ class SchedulerSettingsAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(TeacherBlockedTime)
+class TeacherBlockedTimeAdmin(admin.ModelAdmin):
+    list_display = ('teacher', 'day', 'period_type')
+    list_filter = ('day', 'period_type', 'teacher')
+    search_fields = ('teacher__name',)

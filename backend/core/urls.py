@@ -13,6 +13,7 @@ router.register(r'locations', views.LocationViewSet)
 router.register(r'class-subject-teachers', views.ClassSubjectTeacherViewSet)
 router.register(r'teacher-qualifications', views.TeacherQualificationViewSet)
 router.register(r'schedule-locks', views.ScheduleLockViewSet)
+router.register(r'teacher-blocked-times', views.TeacherBlockedTimeViewSet)
 
 urlpatterns = [
     # 自定义路由放在前面，优先匹配

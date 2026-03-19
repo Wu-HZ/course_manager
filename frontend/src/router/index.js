@@ -32,6 +32,11 @@ const routes = [
     component: () => import('../views/TravelGroupList.vue')
   },
   {
+    path: '/blocked-times',
+    name: 'BlockedTimes',
+    component: () => import('../views/BlockedTimeList.vue')
+  },
+  {
     path: '/combined-groups',
     name: 'CombinedGroups',
     component: () => import('../views/CombinedGroupList.vue')

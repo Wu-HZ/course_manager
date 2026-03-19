@@ -30,6 +30,31 @@ class TravelGroup(models.Model):
         return f"{self.name} (禁排: {self.get_day_off_display()})"
 
 
+PERIOD_TYPE_CHOICES = [
+    ('am', '上午'),
+    ('pm', '下午'),
+    ('all', '全天'),
+]
+
+
+class TeacherBlockedTime(models.Model):
+    """教师禁排时段 - 某教师在特定时段不可排课"""
+    teacher = models.ForeignKey(
+        'Teacher', on_delete=models.CASCADE,
+        verbose_name='教师', related_name='blocked_times'
+    )
+    day = models.IntegerField('星期', choices=DAY_CHOICES)
+    period_type = models.CharField('时段', max_length=3, choices=PERIOD_TYPE_CHOICES)
+
+    class Meta:
+        verbose_name = '教师禁排时段'
+        verbose_name_plural = verbose_name
+        unique_together = ('teacher', 'day', 'period_type')
+
+    def __str__(self):
+        return f"{self.teacher.name} {self.get_day_display()} {self.get_period_type_display()}"
+
+
 class Subject(models.Model):
     """课程"""
     name = models.CharField('课程名称', max_length=50)

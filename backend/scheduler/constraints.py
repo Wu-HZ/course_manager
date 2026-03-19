@@ -483,3 +483,30 @@ def add_combined_class_teacher_constraint(model, schedule_vars, teacher_assignme
             for day, period in combined_slots:
                 if (day, period) in schedule_vars[key]:
                     model.Add(schedule_vars[key][(day, period)] == 0)
+
+
+def add_blocked_time_constraint(model, schedule_vars, teacher_blocked_times, teacher_assignments):
+    """
+    H13: 教师禁排时段约束
+    教师在指定的禁排时段不排课
+    teacher_blocked_times: {teacher_id: [(day, period_type), ...]}
+    period_type: 'am' -> periods 0~3, 'pm' -> periods 4~PERIODS_PER_DAY[day]-1, 'all' -> all periods
+    """
+    for teacher_id, blocked_list in teacher_blocked_times.items():
+        assignments = teacher_assignments.get(teacher_id, [])
+        for day, period_type in blocked_list:
+            # Calculate blocked period range
+            if period_type == 'am':
+                blocked_periods = range(0, AM_PERIODS)
+            elif period_type == 'pm':
+                blocked_periods = range(AM_PERIODS, PERIODS_PER_DAY.get(day, 0))
+            else:  # 'all'
+                blocked_periods = range(0, PERIODS_PER_DAY.get(day, 0))
+
+            for class_id, subject_id in assignments:
+                key = (class_id, subject_id)
+                if key not in schedule_vars:
+                    continue
+                for period in blocked_periods:
+                    if (day, period) in schedule_vars[key]:
+                        model.Add(schedule_vars[key][(day, period)] == 0)

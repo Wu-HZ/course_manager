@@ -10,7 +10,7 @@ from ortools.sat.python import cp_model
 from core.models import (
     SchoolClass, Subject, Teacher, Location,
     ClassSubjectTeacher, TeacherQualification, ScheduleLock,
-    SchedulerSettings
+    SchedulerSettings, TeacherBlockedTime
 )
 from .models import ScheduleResult, ScheduleEntry
 from .time_slots import (
@@ -29,6 +29,7 @@ from .constraints import (
     add_teacher_max_hours_constraint,
     add_teacher_class_daily_limit_constraint,
     add_combined_class_teacher_constraint,
+    add_blocked_time_constraint,
     add_am_preference_objective,
     add_consecutive_preference_objective,
     add_distribution_penalty,
@@ -85,6 +86,11 @@ class ScheduleEngine:
         for teacher_id, teacher in self.teachers.items():
             if teacher.travel_group:
                 self.teacher_day_off[teacher_id] = teacher.travel_group.day_off
+
+        # 教师禁排时段
+        self.teacher_blocked_times = defaultdict(list)
+        for bt in TeacherBlockedTime.objects.all():
+            self.teacher_blocked_times[bt.teacher_id].append((bt.day, bt.period_type))
 
         # 找到校本课程
         self.combined_subject = None
@@ -648,6 +654,13 @@ class ScheduleEngine:
             self.teacher_day_off, self.teacher_assignments
         )
 
+        # H13: 教师禁排时段
+        if self.teacher_blocked_times:
+            add_blocked_time_constraint(
+                self.model, self.schedule_vars,
+                self.teacher_blocked_times, self.teacher_assignments
+            )
+
         # H5: 场地容量
         add_location_capacity_constraint(
             self.model, self.schedule_vars,
@@ -851,10 +864,29 @@ class ScheduleEngine:
                 day_off_slots = PERIODS_PER_DAY.get(day_off, 0)
                 teacher_available = TOTAL_SLOTS - day_off_slots - 1  # 去掉禁排日和班会
                 day_name = DAYS[day_off]
-                info = f"  - {teacher_name}: {hours} 节课 (禁排日: {day_name}, 可用: {teacher_available} 节"
+                info = f"  - {teacher_name}: {hours} 节课 (禁排日: {day_name}"
             else:
                 teacher_available = TOTAL_SLOTS - 1
-                info = f"  - {teacher_name}: {hours} 节课 (无禁排日, 可用: {teacher_available} 节"
+                info = f"  - {teacher_name}: {hours} 节课 (无禁排日"
+
+            # 扣除禁排时段
+            blocked_slots = 0
+            blocked_times = self.teacher_blocked_times.get(teacher_id, [])
+            for bt_day, bt_period_type in blocked_times:
+                if day_off is not None and bt_day == day_off:
+                    continue  # 禁排日已整天扣除，不重复
+                from .time_slots import AM_PERIODS
+                if bt_period_type == 'am':
+                    blocked_slots += AM_PERIODS
+                elif bt_period_type == 'pm':
+                    blocked_slots += PERIODS_PER_DAY.get(bt_day, 0) - AM_PERIODS
+                else:  # 'all'
+                    blocked_slots += PERIODS_PER_DAY.get(bt_day, 0)
+            teacher_available -= blocked_slots
+            if blocked_times:
+                info += f", 禁排时段扣除: {blocked_slots}节"
+
+            info += f", 可用: {teacher_available} 节"
 
             # 加上课时范围信息
             min_hours = teacher.min_weekly_hours
@@ -899,6 +931,7 @@ class ScheduleEngine:
 
             # 计算这位教师每天的可用时段
             daily_available = {}
+            blocked_times = self.teacher_blocked_times.get(teacher_id, [])
             for day in range(5):
                 if day_off == day:
                     daily_available[day] = 0
@@ -906,6 +939,17 @@ class ScheduleEngine:
                     daily_available[day] = PERIODS_PER_DAY[day] - 1  # 去掉班会
                 else:
                     daily_available[day] = PERIODS_PER_DAY[day]
+                # 扣除禁排时段
+                for bt_day, bt_period_type in blocked_times:
+                    if bt_day != day or day_off == day:
+                        continue
+                    from .time_slots import AM_PERIODS
+                    if bt_period_type == 'am':
+                        daily_available[day] -= AM_PERIODS
+                    elif bt_period_type == 'pm':
+                        daily_available[day] -= (PERIODS_PER_DAY.get(day, 0) - AM_PERIODS)
+                    else:  # 'all'
+                        daily_available[day] = 0
 
             total_available = sum(daily_available.values())
             total_needed = sum(a[2] for a in assignments)

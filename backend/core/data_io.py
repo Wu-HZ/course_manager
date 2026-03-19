@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from .models import (
     TravelGroup, Subject, CombinedClassGroup, Teacher,
     SchoolClass, Location, ClassSubjectTeacher, TeacherQualification,
-    ScheduleLock
+    ScheduleLock, TeacherBlockedTime
 )
 
 
@@ -87,10 +87,18 @@ SHEET_CONFIG = {
             'teacher__name': ('teacher', Teacher, 'name'),
         },
     },
+    '教师禁排日': {
+        'model': TeacherBlockedTime,
+        'fields': ['teacher__name', 'day', 'period_type'],
+        'headers': ['教师姓名', '星期(0-4)', '时段(am/pm/all)'],
+        'fk_fields': {
+            'teacher__name': ('teacher', Teacher, 'name'),
+        },
+    },
 }
 
 # 导出顺序（按依赖关系排列）
-EXPORT_ORDER = ['送教分组', '校本课程分组', '场地', '课程', '教师', '班级', '教师资质', '授课分配', '课表锁定']
+EXPORT_ORDER = ['送教分组', '校本课程分组', '场地', '课程', '教师', '教师禁排日', '班级', '教师资质', '授课分配', '课表锁定']
 
 
 def style_header(ws):
@@ -264,6 +272,14 @@ def import_data(request):
                         school_class=data.get('school_class'),
                         day=data.get('day'),
                         period=data.get('period'),
+                        defaults=data
+                    )
+                elif model == TeacherBlockedTime:
+                    # 教师禁排日用组合键查找
+                    obj, is_created = model.objects.update_or_create(
+                        teacher=data.get('teacher'),
+                        day=data.get('day'),
+                        period_type=data.get('period_type'),
                         defaults=data
                     )
                 else:

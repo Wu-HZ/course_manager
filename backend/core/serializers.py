@@ -2,7 +2,8 @@ from rest_framework import serializers
 from .models import (
     TravelGroup, Subject, CombinedClassGroup, Teacher,
     SchoolClass, Location, ClassSubjectTeacher,
-    TeacherQualification, ScheduleLock, SchedulerSettings
+    TeacherQualification, ScheduleLock, SchedulerSettings,
+    TeacherBlockedTime
 )
 
 
@@ -112,4 +113,14 @@ class ScheduleLockSerializer(serializers.ModelSerializer):
 class SchedulerSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SchedulerSettings
+        fields = '__all__'
+
+
+class TeacherBlockedTimeSerializer(serializers.ModelSerializer):
+    teacher_name = serializers.CharField(source='teacher.name', read_only=True)
+    day_display = serializers.CharField(source='get_day_display', read_only=True)
+    period_type_display = serializers.CharField(source='get_period_type_display', read_only=True)
+
+    class Meta:
+        model = TeacherBlockedTime
         fields = '__all__'

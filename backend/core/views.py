@@ -4,14 +4,16 @@ from rest_framework.response import Response
 from .models import (
     TravelGroup, Subject, CombinedClassGroup, Teacher,
     SchoolClass, Location, ClassSubjectTeacher,
-    TeacherQualification, ScheduleLock, SchedulerSettings
+    TeacherQualification, ScheduleLock, SchedulerSettings,
+    TeacherBlockedTime
 )
 from .serializers import (
     TravelGroupSerializer, SubjectSerializer, CombinedClassGroupSerializer,
     TeacherSerializer, SchoolClassSerializer, LocationSerializer,
     ClassSubjectTeacherSerializer,
     TeacherQualificationSerializer, ScheduleLockSerializer,
-    SchedulerSettingsSerializer
+    SchedulerSettingsSerializer,
+    TeacherBlockedTimeSerializer
 )
 
 
@@ -57,6 +59,11 @@ class ClassSubjectTeacherViewSet(viewsets.ModelViewSet):
 class TeacherQualificationViewSet(viewsets.ModelViewSet):
     queryset = TeacherQualification.objects.select_related('teacher', 'subject').all()
     serializer_class = TeacherQualificationSerializer
+
+
+class TeacherBlockedTimeViewSet(viewsets.ModelViewSet):
+    queryset = TeacherBlockedTime.objects.select_related('teacher').all()
+    serializer_class = TeacherBlockedTimeSerializer
 
 
 @api_view(['GET'])
