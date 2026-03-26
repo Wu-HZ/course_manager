@@ -29,6 +29,7 @@
     <el-card v-if="result" class="result-card" :class="resultClass">
       <template #header>排课结果</template>
       <el-descriptions :column="2" border>
+        <el-descriptions-item label="结果名称">{{ getScheduleResultDisplayName(result) }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag :type="statusType">{{ statusText }}</el-tag>
         </el-descriptions-item>
@@ -91,11 +92,12 @@
       <template #header>历史记录</template>
       <el-table :data="history" stripe border>
         <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="display_name" label="名称" min-width="180" />
         <el-table-column prop="created_at" label="创建时间" />
         <el-table-column label="状态">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.solve_status)" size="small">
-              {{ row.solve_status }}
+              {{ getScheduleResultStatusText(row.solve_status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -126,6 +128,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { runSchedule as runScheduleApi, getScheduleResults, activateResult as activateApi } from '../api/scheduler'
+import { getScheduleResultDisplayName, getScheduleResultStatusText } from '../utils/scheduleResults'
 
 const timeLimit = ref(300)
 const maxAttempts = ref(50)
@@ -139,14 +142,7 @@ const autoAssignedCount = ref(null)
 const retryStats = ref(null)
 
 const statusText = computed(() => {
-  const map = {
-    OPTIMAL: '最优解',
-    FEASIBLE: '可行解',
-    INFEASIBLE: '无可行解',
-    UNKNOWN: '未知',
-    FAILED_ALL_ATTEMPTS: '全部尝试失败'
-  }
-  return map[result.value?.solve_status] || result.value?.solve_status
+  return getScheduleResultStatusText(result.value?.solve_status)
 })
 
 const statusType = computed(() => getStatusType(result.value?.solve_status))

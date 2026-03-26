@@ -9,7 +9,7 @@
             <el-option
               v-for="r in results"
               :key="r.id"
-              :label="`#${r.id} - ${r.created_at} (${r.solve_status})`"
+              :label="formatScheduleResultLabel(r)"
               :value="r.id"
             />
           </el-select>
@@ -79,6 +79,7 @@ import * as XLSX from 'xlsx'
 import { getScheduleResults, getTeacherTimetable } from '../api/scheduler'
 import { getTeachers } from '../api/teachers'
 import { getTravelGroups } from '../api/resources'
+import { formatScheduleResultLabel } from '../utils/scheduleResults'
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五']
 const WEEKS = [1, 2, 3, 4]

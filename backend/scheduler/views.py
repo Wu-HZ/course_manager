@@ -1,9 +1,11 @@
-from rest_framework import viewsets, status
+from django.db import transaction
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import ScheduleResult, ScheduleEntry
 from .serializers import (
-    ScheduleResultSerializer, ScheduleResultListSerializer, ScheduleEntrySerializer
+    ScheduleResultSerializer, ScheduleResultListSerializer,
+    ScheduleResultRenameSerializer, ScheduleEntrySerializer
 )
 from .engine import run_scheduler
 
@@ -48,13 +50,44 @@ def run_schedule(request):
         return Response(data, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ScheduleResultViewSet(viewsets.ReadOnlyModelViewSet):
+class ScheduleResultViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet
+):
     queryset = ScheduleResult.objects.all()
+    http_method_names = ['get', 'patch', 'delete', 'head', 'options']
 
     def get_serializer_class(self):
         if self.action == 'list':
             return ScheduleResultListSerializer
+        if self.action in ['partial_update', 'update']:
+            return ScheduleResultRenameSerializer
         return ScheduleResultSerializer
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(name=serializer.validated_data.get('name', '').strip())
+        return Response(ScheduleResultListSerializer(instance).data)
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            was_active = instance.is_active
+            instance.delete()
+
+            if not was_active:
+                return
+
+            fallback = ScheduleResult.objects.filter(
+                solve_status__in=['OPTIMAL', 'FEASIBLE']
+            ).order_by('-created_at').first()
+            if fallback:
+                fallback.is_active = True
+                fallback.save(update_fields=['is_active'])
 
 
 @api_view(['POST'])

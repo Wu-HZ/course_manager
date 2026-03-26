@@ -12,6 +12,7 @@ class ScheduleResult(models.Model):
         ('UNKNOWN', '未知'),
     ]
 
+    name = models.CharField('结果名称', max_length=120, blank=True, default='')
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     is_active = models.BooleanField('当前使用', default=False)
     solve_status = models.CharField(
@@ -29,8 +30,12 @@ class ScheduleResult(models.Model):
         verbose_name_plural = verbose_name
         ordering = ['-created_at']
 
+    @property
+    def display_name(self):
+        return self.name.strip() or f"课表 #{self.id}"
+
     def __str__(self):
-        return f"排课结果 #{self.id} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
+        return f"{self.display_name} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
 
     def save(self, *args, **kwargs):
         # 如果设为当前使用, 取消其他结果的激活状态

@@ -30,11 +30,12 @@ class ScheduleEntrySerializer(serializers.ModelSerializer):
 class ScheduleResultSerializer(serializers.ModelSerializer):
     entries = ScheduleEntrySerializer(many=True, read_only=True)
     entry_count = serializers.IntegerField(source='entries.count', read_only=True)
+    display_name = serializers.ReadOnlyField()
 
     class Meta:
         model = ScheduleResult
         fields = [
-            'id', 'created_at', 'is_active', 'solve_status',
+            'id', 'name', 'display_name', 'created_at', 'is_active', 'solve_status',
             'solve_time_ms', 'notes', 'entries', 'entry_count',
             'combined_class_assignments'
         ]
@@ -42,11 +43,25 @@ class ScheduleResultSerializer(serializers.ModelSerializer):
 
 class ScheduleResultListSerializer(serializers.ModelSerializer):
     entry_count = serializers.IntegerField(source='entries.count', read_only=True)
+    display_name = serializers.ReadOnlyField()
 
     class Meta:
         model = ScheduleResult
         fields = [
-            'id', 'created_at', 'is_active', 'solve_status',
+            'id', 'name', 'display_name', 'created_at', 'is_active', 'solve_status',
             'solve_time_ms', 'notes', 'entry_count',
             'combined_class_assignments'
         ]
+
+
+class ScheduleResultRenameSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ScheduleResult
+        fields = ['name']
+        extra_kwargs = {
+            'name': {
+                'allow_blank': True,
+                'required': False,
+                'trim_whitespace': True,
+            }
+        }

@@ -12,6 +12,8 @@ export const runSchedule = (params = {}) => {
 export const getScheduleResults = () => api.get('/scheduler/results/')
 export const getScheduleResult = (id) => api.get(`/scheduler/results/${id}/`)
 export const activateResult = (id) => api.post(`/scheduler/results/${id}/activate/`)
+export const renameScheduleResult = (id, name) => api.patch(`/scheduler/results/${id}/`, { name })
+export const deleteScheduleResult = (id) => api.delete(`/scheduler/results/${id}/`)
 export const getActiveSchedule = () => api.get('/scheduler/active/')
 
 export const getClassTimetable = (resultId, classId) =>

@@ -14,9 +14,10 @@ class ScheduleEntryInline(admin.TabularInline):
 
 @admin.register(ScheduleResult)
 class ScheduleResultAdmin(admin.ModelAdmin):
-    list_display = ('id', 'created_at', 'solve_status', 'solve_time_ms', 'is_active')
+    list_display = ('id', 'display_name', 'created_at', 'solve_status', 'solve_time_ms', 'is_active')
     list_filter = ('solve_status', 'is_active')
-    readonly_fields = ('created_at', 'solve_status', 'solve_time_ms')
+    search_fields = ('name',)
+    readonly_fields = ('created_at', 'solve_status', 'solve_time_ms', 'display_name')
     inlines = [ScheduleEntryInline]
 
 
