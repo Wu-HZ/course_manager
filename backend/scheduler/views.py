@@ -1,13 +1,21 @@
 from django.db import transaction
+from django.db.models import Count, Q
 from rest_framework import mixins, status, viewsets
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from .models import ScheduleResult, ScheduleEntry
 from .serializers import (
     ScheduleResultSerializer, ScheduleResultListSerializer,
-    ScheduleResultRenameSerializer, ScheduleEntrySerializer
+    ScheduleResultUpdateSerializer, ScheduleEntrySerializer
 )
 from .engine import run_scheduler
+
+
+class ScheduleResultPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
 
 
 @api_view(['POST'])
@@ -58,36 +66,81 @@ class ScheduleResultViewSet(
     viewsets.GenericViewSet
 ):
     queryset = ScheduleResult.objects.all()
-    http_method_names = ['get', 'patch', 'delete', 'head', 'options']
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+    pagination_class = ScheduleResultPagination
+
+    def get_queryset(self):
+        qs = ScheduleResult.objects.annotate(entry_count=Count('entries'))
+        params = self.request.query_params
+
+        is_favorite = params.get('is_favorite')
+        if is_favorite in ('true', '1'):
+            qs = qs.filter(is_favorite=True)
+        elif is_favorite in ('false', '0'):
+            qs = qs.filter(is_favorite=False)
+
+        solve_status = params.get('solve_status')
+        if solve_status:
+            qs = qs.filter(solve_status=solve_status)
+
+        search = params.get('search')
+        if search:
+            qs = qs.filter(name__icontains=search.strip())
+
+        return qs.order_by('-is_favorite', '-created_at')
 
     def get_serializer_class(self):
         if self.action == 'list':
             return ScheduleResultListSerializer
         if self.action in ['partial_update', 'update']:
-            return ScheduleResultRenameSerializer
+            return ScheduleResultUpdateSerializer
         return ScheduleResultSerializer
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save(name=serializer.validated_data.get('name', '').strip())
+        save_kwargs = {}
+        if 'name' in serializer.validated_data:
+            save_kwargs['name'] = serializer.validated_data['name'].strip()
+        if 'is_favorite' in serializer.validated_data:
+            save_kwargs['is_favorite'] = serializer.validated_data['is_favorite']
+        serializer.save(**save_kwargs)
         return Response(ScheduleResultListSerializer(instance).data)
 
     def perform_destroy(self, instance):
         with transaction.atomic():
             was_active = instance.is_active
             instance.delete()
+            self._ensure_active_fallback(was_active)
 
-            if not was_active:
-                return
+    @action(detail=False, methods=['post'], url_path='bulk_delete')
+    def bulk_delete(self, request):
+        ids = request.data.get('ids') or []
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {'error': '需要提供 ids 数组'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-            fallback = ScheduleResult.objects.filter(
-                solve_status__in=['OPTIMAL', 'FEASIBLE']
-            ).order_by('-created_at').first()
-            if fallback:
-                fallback.is_active = True
-                fallback.save(update_fields=['is_active'])
+        with transaction.atomic():
+            qs = ScheduleResult.objects.filter(pk__in=ids)
+            had_active = qs.filter(is_active=True).exists()
+            deleted_count, _ = qs.delete()
+            self._ensure_active_fallback(had_active)
+
+        return Response({'deleted': deleted_count})
+
+    @staticmethod
+    def _ensure_active_fallback(was_active):
+        if not was_active:
+            return
+        fallback = ScheduleResult.objects.filter(
+            solve_status__in=['OPTIMAL', 'FEASIBLE']
+        ).order_by('-is_favorite', '-created_at').first()
+        if fallback:
+            fallback.is_active = True
+            fallback.save(update_fields=['is_active'])
 
 
 @api_view(['POST'])

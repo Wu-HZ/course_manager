@@ -3,27 +3,14 @@
     <h2>课表查看</h2>
 
     <el-card class="filter-card">
-      <el-form :inline="true">
-        <el-form-item label="排课结果">
-          <el-select
-            v-model="selectedResult"
-            placeholder="选择排课结果"
-            :disabled="resultActionLoading"
-            @change="onResultChange"
-          >
-            <el-option
-              v-for="r in results"
-              :key="r.id"
-              :label="formatResultOptionLabel(r)"
-              :value="r.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="currentResult">
-          <span class="current-result-name">{{ getScheduleResultDisplayName(currentResult) }}</span>
-          <el-button :loading="resultActionLoading" @click="renameSelectedResult">改名</el-button>
-          <el-button type="danger" plain :loading="resultActionLoading" @click="deleteSelectedResult">删除</el-button>
-        </el-form-item>
+      <div class="filter-row">
+        <ScheduleResultPicker
+          v-model="selectedResult"
+          :current-result="currentResult"
+          @refresh="onPickerRefresh"
+        />
+      </div>
+      <el-form :inline="true" style="margin-top: 12px;">
         <el-form-item label="查看方式">
           <el-radio-group v-model="viewType" @change="loadAllTimetables">
             <el-radio-button value="class">按班级</el-radio-button>
@@ -119,8 +106,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, computed, onMounted, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -128,30 +114,27 @@ import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import TimetableGrid from '../components/TimetableGrid.vue'
+import ScheduleResultPicker from '../components/ScheduleResultPicker.vue'
 import {
-  getScheduleResults, getClassTimetable, getTeacherTimetable,
-  renameScheduleResult, deleteScheduleResult
+  getClassTimetable, getTeacherTimetable,
+  getActiveSchedule, getScheduleResult
 } from '../api/scheduler'
 import { getClasses } from '../api/classes'
 import { getTeachers } from '../api/teachers'
 import { getTravelGroups, getAssignments } from '../api/resources'
 import { getSubjects } from '../api/subjects'
-import {
-  formatScheduleResultLabel, buildScheduleResultFileLabel, getScheduleResultDisplayName
-} from '../utils/scheduleResults'
+import { buildScheduleResultFileLabel } from '../utils/scheduleResults'
 
 // 注册 ECharts 组件
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
 
-const results = ref([])
 const classes = ref([])
 const teachers = ref([])
 const selectedResult = ref(null)
+const currentResult = ref(null)
 const viewType = ref('class')
 const allTimetables = ref([])
-const combinedAssignments = ref({})
 const travelGroups = ref([])
-const resultActionLoading = ref(false)
 const timetableRefs = {}
 
 const setTimetableRef = (id, el) => {
@@ -163,25 +146,7 @@ const setTimetableRef = (id, el) => {
 }
 
 const targets = computed(() => viewType.value === 'class' ? classes.value : teachers.value)
-const currentResult = computed(() => (
-  results.value.find(r => r.id === selectedResult.value) || null
-))
-
-const formatResultOptionLabel = (result) => formatScheduleResultLabel(result)
-
-const isDialogCancelled = (error) => (
-  error === 'cancel' ||
-  error === 'close' ||
-  error?.action === 'cancel' ||
-  error?.action === 'close'
-)
-
-const applySelectedResult = (preferredId = selectedResult.value) => {
-  const matched = results.value.find(r => r.id === preferredId)
-  const nextResult = matched || results.value.find(r => r.is_active) || results.value[0] || null
-  selectedResult.value = nextResult?.id ?? null
-  combinedAssignments.value = nextResult?.combined_class_assignments || {}
-}
+const combinedAssignments = computed(() => currentResult.value?.combined_class_assignments || {})
 
 // 按课时量从大到小排序（图表用）
 const sortedTimetables = computed(() =>
@@ -336,26 +301,48 @@ const calcStats = (entries) => {
 }
 
 const loadData = async () => {
-  const [resultList, classList, teacherList, travelGroupList] = await Promise.all([
-    getScheduleResults(), getClasses(), getTeachers(), getTravelGroups()
+  const [classList, teacherList, travelGroupList] = await Promise.all([
+    getClasses(), getTeachers(), getTravelGroups()
   ])
-  results.value = resultList
   classes.value = classList
   teachers.value = teacherList
   travelGroups.value = travelGroupList
-  applySelectedResult()
+
+  // 初始：尝试取当前激活的排课结果
+  try {
+    const active = await getActiveSchedule()
+    currentResult.value = active
+    selectedResult.value = active?.id ?? null
+  } catch {
+    currentResult.value = null
+    selectedResult.value = null
+  }
 }
 
-const refreshResults = async (preferredId = selectedResult.value) => {
-  results.value = await getScheduleResults()
-  applySelectedResult(preferredId)
+const loadCurrentResult = async (id) => {
+  if (!id) {
+    currentResult.value = null
+    return
+  }
+  try {
+    currentResult.value = await getScheduleResult(id)
+  } catch {
+    currentResult.value = null
+  }
+}
+
+const onPickerRefresh = async () => {
+  // 抽屉里做过改名/星标等操作 → 同步刷新摘要
+  if (selectedResult.value) {
+    await loadCurrentResult(selectedResult.value)
+  }
+}
+
+watch(selectedResult, async (nextId, prevId) => {
+  if (nextId === prevId) return
+  await loadCurrentResult(nextId)
   await loadAllTimetables()
-}
-
-const onResultChange = () => {
-  applySelectedResult(selectedResult.value)
-  loadAllTimetables()
-}
+})
 
 const loadAllTimetables = async () => {
   if (!selectedResult.value) {
@@ -387,62 +374,6 @@ const loadAllTimetables = async () => {
   })
 
   allTimetables.value = await Promise.all(promises)
-}
-
-const renameSelectedResult = async () => {
-  if (!currentResult.value) return
-
-  try {
-    const { value } = await ElMessageBox.prompt(
-      '输入新的课表名称，留空将恢复默认名称。',
-      '重命名课表',
-      {
-        confirmButtonText: '保存',
-        cancelButtonText: '取消',
-        inputValue: currentResult.value.name || '',
-        inputPlaceholder: '例如：三月试排 V2'
-      }
-    )
-
-    resultActionLoading.value = true
-    const nextName = value.trim()
-    await renameScheduleResult(currentResult.value.id, nextName)
-    ElMessage.success(nextName ? '课表名称已更新' : '已恢复默认课表名称')
-    await refreshResults(currentResult.value.id)
-  } catch (error) {
-    if (isDialogCancelled(error)) return
-    ElMessage.error('重命名失败')
-  } finally {
-    resultActionLoading.value = false
-  }
-}
-
-const deleteSelectedResult = async () => {
-  if (!currentResult.value) return
-
-  const displayName = getScheduleResultDisplayName(currentResult.value)
-
-  try {
-    await ElMessageBox.confirm(
-      `确定删除“${displayName}”吗？删除后该次排课结果及课表条目都会一起移除。`,
-      '删除课表',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-
-    resultActionLoading.value = true
-    await deleteScheduleResult(currentResult.value.id)
-    ElMessage.success(`已删除 ${displayName}`)
-    await refreshResults()
-  } catch (error) {
-    if (isDialogCancelled(error)) return
-    ElMessage.error('删除失败')
-  } finally {
-    resultActionLoading.value = false
-  }
 }
 
 const exportToExcel = () => {
@@ -600,10 +531,7 @@ const exportToJSON = async () => {
   URL.revokeObjectURL(url)
 }
 
-onMounted(async () => {
-  await loadData()
-  await loadAllTimetables()
-})
+onMounted(loadData)
 </script>
 
 <style scoped>
@@ -623,9 +551,7 @@ onMounted(async () => {
   color: #606266;
   font-weight: normal;
 }
-.current-result-name {
-  margin-right: 12px;
-  color: #303133;
-  font-weight: 600;
+.filter-row {
+  margin-bottom: 4px;
 }
 </style>

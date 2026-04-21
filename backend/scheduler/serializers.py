@@ -28,40 +28,50 @@ class ScheduleEntrySerializer(serializers.ModelSerializer):
 
 
 class ScheduleResultSerializer(serializers.ModelSerializer):
-    entries = ScheduleEntrySerializer(many=True, read_only=True)
-    entry_count = serializers.IntegerField(source='entries.count', read_only=True)
+    entry_count = serializers.SerializerMethodField()
     display_name = serializers.ReadOnlyField()
 
     class Meta:
         model = ScheduleResult
         fields = [
-            'id', 'name', 'display_name', 'created_at', 'is_active', 'solve_status',
-            'solve_time_ms', 'notes', 'entries', 'entry_count',
-            'combined_class_assignments'
+            'id', 'name', 'display_name', 'created_at', 'is_active',
+            'is_favorite', 'solve_status', 'solve_time_ms', 'notes',
+            'entry_count', 'combined_class_assignments'
         ]
+
+    def get_entry_count(self, obj):
+        annotated = getattr(obj, 'entry_count', None)
+        return annotated if annotated is not None else obj.entries.count()
 
 
 class ScheduleResultListSerializer(serializers.ModelSerializer):
-    entry_count = serializers.IntegerField(source='entries.count', read_only=True)
+    entry_count = serializers.SerializerMethodField()
     display_name = serializers.ReadOnlyField()
 
     class Meta:
         model = ScheduleResult
         fields = [
-            'id', 'name', 'display_name', 'created_at', 'is_active', 'solve_status',
-            'solve_time_ms', 'notes', 'entry_count',
-            'combined_class_assignments'
+            'id', 'name', 'display_name', 'created_at', 'is_active',
+            'is_favorite', 'solve_status', 'solve_time_ms', 'notes',
+            'entry_count', 'combined_class_assignments'
         ]
 
+    def get_entry_count(self, obj):
+        annotated = getattr(obj, 'entry_count', None)
+        return annotated if annotated is not None else obj.entries.count()
 
-class ScheduleResultRenameSerializer(serializers.ModelSerializer):
+
+class ScheduleResultUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ScheduleResult
-        fields = ['name']
+        fields = ['name', 'is_favorite']
         extra_kwargs = {
             'name': {
                 'allow_blank': True,
                 'required': False,
                 'trim_whitespace': True,
-            }
+            },
+            'is_favorite': {
+                'required': False,
+            },
         }

@@ -7,12 +7,25 @@ const STATUS_TEXT_MAP = {
   FAILED_ALL_ATTEMPTS: '全部尝试失败'
 }
 
+const STATUS_TAG_TYPE_MAP = {
+  OPTIMAL: 'success',
+  FEASIBLE: 'warning',
+  INFEASIBLE: 'danger',
+  MODEL_INVALID: 'danger',
+  UNKNOWN: 'info',
+  FAILED_ALL_ATTEMPTS: 'danger'
+}
+
 export const getScheduleResultDisplayName = (result) => (
   result?.display_name || `课表 #${result?.id ?? ''}`
 )
 
 export const getScheduleResultStatusText = (status) => (
   STATUS_TEXT_MAP[status] || status || '未知'
+)
+
+export const getScheduleResultStatusType = (status) => (
+  STATUS_TAG_TYPE_MAP[status] || 'info'
 )
 
 export const formatScheduleResultLabel = (result) => {

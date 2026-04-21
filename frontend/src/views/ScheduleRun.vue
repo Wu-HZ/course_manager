@@ -90,45 +90,27 @@
 
     <el-card class="history-card">
       <template #header>历史记录</template>
-      <el-table :data="history" stripe border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="display_name" label="名称" min-width="180" />
-        <el-table-column prop="created_at" label="创建时间" />
-        <el-table-column label="状态">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.solve_status)" size="small">
-              {{ getScheduleResultStatusText(row.solve_status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="solve_time_ms" label="耗时(ms)" width="100" />
-        <el-table-column prop="entry_count" label="条目数" width="80" />
-        <el-table-column label="当前" width="80">
-          <template #default="{ row }">
-            <el-tag v-if="row.is_active" type="success" size="small">使用中</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="{ row }">
-            <el-button
-              v-if="!row.is_active && row.solve_status !== 'INFEASIBLE'"
-              size="small"
-              @click="activateResult(row.id)"
-            >
-              激活
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <ScheduleResultPicker
+        ref="pickerRef"
+        inline
+        :model-value="result?.id ?? null"
+        :current-result="result"
+        @update:model-value="onHistorySelect"
+      />
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { runSchedule as runScheduleApi, getScheduleResults, activateResult as activateApi } from '../api/scheduler'
-import { getScheduleResultDisplayName, getScheduleResultStatusText } from '../utils/scheduleResults'
+import { runSchedule as runScheduleApi, getScheduleResult } from '../api/scheduler'
+import {
+  getScheduleResultDisplayName,
+  getScheduleResultStatusText,
+  getScheduleResultStatusType
+} from '../utils/scheduleResults'
+import ScheduleResultPicker from '../components/ScheduleResultPicker.vue'
 
 const timeLimit = ref(300)
 const maxAttempts = ref(50)
@@ -137,34 +119,35 @@ const running = ref(false)
 const result = ref(null)
 const errors = ref([])
 const diagnostics = ref([])
-const history = ref([])
 const autoAssignedCount = ref(null)
 const retryStats = ref(null)
+const pickerRef = ref(null)
 
 const statusText = computed(() => {
   return getScheduleResultStatusText(result.value?.solve_status)
 })
 
-const statusType = computed(() => getStatusType(result.value?.solve_status))
+const statusType = computed(() => getScheduleResultStatusType(result.value?.solve_status))
 const resultClass = computed(() => {
   const status = result.value?.solve_status
   if (status === 'INFEASIBLE' || status === 'FAILED_ALL_ATTEMPTS') return 'error'
   return 'success'
 })
 
-const getStatusType = (status) => {
-  const map = {
-    OPTIMAL: 'success',
-    FEASIBLE: 'warning',
-    INFEASIBLE: 'danger',
-    UNKNOWN: 'info',
-    FAILED_ALL_ATTEMPTS: 'danger'
+const onHistorySelect = async (id) => {
+  if (!id) {
+    result.value = null
+    return
   }
-  return map[status] || 'info'
-}
-
-const loadHistory = async () => {
-  history.value = await getScheduleResults()
+  try {
+    result.value = await getScheduleResult(id)
+    errors.value = []
+    diagnostics.value = []
+    autoAssignedCount.value = null
+    retryStats.value = null
+  } catch {
+    ElMessage.error('加载排课结果失败')
+  }
 }
 
 const runSchedule = async () => {
@@ -189,7 +172,7 @@ const runSchedule = async () => {
       diagnostics.value = res.diagnostics || []
     }
     ElMessage.success('排课完成')
-    loadHistory()
+    pickerRef.value?.refresh()
   } catch (e) {
     if (e.response?.data) {
       result.value = e.response.data.result || { solve_status: e.response.data.status }
@@ -207,21 +190,9 @@ const runSchedule = async () => {
     }
   } finally {
     running.value = false
-    loadHistory()  // 无论成功失败都刷新历史
+    pickerRef.value?.refresh()  // 无论成功失败都刷新历史
   }
 }
-
-const activateResult = async (id) => {
-  try {
-    await activateApi(id)
-    ElMessage.success('已激活')
-    loadHistory()
-  } catch (e) {
-    ElMessage.error('操作失败')
-  }
-}
-
-onMounted(loadHistory)
 </script>
 
 <style scoped>

@@ -15,6 +15,7 @@ class ScheduleResult(models.Model):
     name = models.CharField('结果名称', max_length=120, blank=True, default='')
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     is_active = models.BooleanField('当前使用', default=False)
+    is_favorite = models.BooleanField('收藏', default=False)
     solve_status = models.CharField(
         '求解状态', max_length=20, choices=SOLVE_STATUS_CHOICES, default='UNKNOWN'
     )
@@ -28,7 +29,7 @@ class ScheduleResult(models.Model):
     class Meta:
         verbose_name = '排课结果'
         verbose_name_plural = verbose_name
-        ordering = ['-created_at']
+        ordering = ['-is_favorite', '-created_at']
 
     @property
     def display_name(self):

@@ -3,17 +3,15 @@
     <h2>听课分配</h2>
 
     <el-card class="filter-card">
-      <el-form :inline="true">
-        <el-form-item label="排课结果">
-          <el-select v-model="selectedResult" placeholder="选择排课结果">
-            <el-option
-              v-for="r in results"
-              :key="r.id"
-              :label="formatScheduleResultLabel(r)"
-              :value="r.id"
-            />
-          </el-select>
-        </el-form-item>
+      <div class="filter-row">
+        <ScheduleResultPicker
+          v-model="selectedResult"
+          :current-result="currentResult"
+          :show-activate-action="false"
+          @refresh="refreshCurrent"
+        />
+      </div>
+      <el-form :inline="true" style="margin-top: 12px;">
         <el-form-item label="同一教师最多听">
           <el-input-number v-model="maxPerTarget" :min="1" :max="6" :step="1" style="width: 100px;" />
           <span style="margin-left: 4px;">次</span>
@@ -74,22 +72,22 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import * as XLSX from 'xlsx'
-import { getScheduleResults, getTeacherTimetable } from '../api/scheduler'
+import { getTeacherTimetable, getActiveSchedule, getScheduleResult } from '../api/scheduler'
 import { getTeachers } from '../api/teachers'
 import { getTravelGroups } from '../api/resources'
-import { formatScheduleResultLabel } from '../utils/scheduleResults'
+import ScheduleResultPicker from '../components/ScheduleResultPicker.vue'
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五']
 const WEEKS = [1, 2, 3, 4]
 const PERIODS_PER_DAY = { 0: 6, 1: 6, 2: 6, 3: 6, 4: 4 }
 const REQUIRED_COUNT = 6
 
-const results = ref([])
 const teachers = ref([])
 const travelGroups = ref([])
 const selectedResult = ref(null)
+const currentResult = ref(null)
 const maxPerTarget = ref(2)
 const assignments = ref([])
 const warnings = ref([])
@@ -301,17 +299,32 @@ const exportToExcel = () => {
   XLSX.writeFile(wb, `听课分配_#${selectedResult.value}.xlsx`)
 }
 
+const reloadCurrent = async () => {
+  if (!selectedResult.value) {
+    currentResult.value = null
+    return
+  }
+  try {
+    currentResult.value = await getScheduleResult(selectedResult.value)
+  } catch {
+    currentResult.value = null
+  }
+}
+
+const refreshCurrent = reloadCurrent
+
+watch(selectedResult, reloadCurrent)
+
 onMounted(async () => {
-  const [r, t, g] = await Promise.all([getScheduleResults(), getTeachers(), getTravelGroups()])
-  results.value = r
+  const [t, g] = await Promise.all([getTeachers(), getTravelGroups()])
   teachers.value = t
   travelGroups.value = g
-  // Auto-select active result
-  const active = r.find(x => x.is_active)
-  if (active) {
-    selectedResult.value = active.id
-  } else if (r.length) {
-    selectedResult.value = r[0].id
+  try {
+    const active = await getActiveSchedule()
+    currentResult.value = active
+    selectedResult.value = active?.id ?? null
+  } catch {
+    // no active result available
   }
 })
 </script>
@@ -320,4 +333,5 @@ onMounted(async () => {
 .page-container { background: #fff; padding: 20px; border-radius: 4px; }
 .page-container h2 { margin-bottom: 20px; }
 .filter-card { margin-bottom: 20px; }
+.filter-row { margin-bottom: 4px; }
 </style>
