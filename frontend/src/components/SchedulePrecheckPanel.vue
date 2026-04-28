@@ -5,7 +5,7 @@
         <div>
           <div class="card-title">排课前检查</div>
           <div class="card-subtitle">
-            开始排课前，系统会检查基础数据、授课分配和关键约束。请先处理红色问题。
+            检查项来自当前实现：普通课程的资质与授课分配、特殊场地容量、教师禁排以及班级课程锁定。红色问题会阻止排课，黄色问题仅作提醒。
           </div>
         </div>
         <el-tag
@@ -13,7 +13,7 @@
           :type="precheck.summary.can_run ? 'success' : 'danger'"
           effect="dark"
         >
-          {{ precheck.summary.can_run ? '基础检查已通过' : '存在必须处理项' }}
+          {{ precheck.summary.can_run ? '必需项已通过' : '存在阻塞项' }}
         </el-tag>
       </div>
     </template>
@@ -23,17 +23,17 @@
         <div class="metric-item">
           <div class="metric-label">校课时量</div>
           <div class="metric-value">{{ precheck.summary.total_school_hours }} 节</div>
-          <div class="metric-tip">含校本课程、班会课</div>
+          <div class="metric-tip">包含普通课程、校本课程和班会课</div>
         </div>
         <div class="metric-item">
           <div class="metric-label">人均课时</div>
           <div class="metric-value">{{ averageTeacherHoursDisplay }} 节/人</div>
-          <div class="metric-tip">按全校总课时 / 教师数</div>
+          <div class="metric-tip">按全校总课时 ÷ 教师数估算</div>
         </div>
       </div>
 
       <div v-if="precheck.blocking_issues.length" class="section">
-        <div class="section-title danger">必须处理</div>
+        <div class="section-title danger">阻塞项</div>
         <div
           v-for="issue in precheck.blocking_issues"
           :key="issue.key"
@@ -57,7 +57,7 @@
       </div>
 
       <div v-if="precheck.warning_issues.length" class="section">
-        <div class="section-title warning">建议处理</div>
+        <div class="section-title warning">提醒项</div>
         <div
           v-for="issue in precheck.warning_issues"
           :key="issue.key"
@@ -131,12 +131,12 @@ const footerText = computed(() => {
     return '暂无检查结果。'
   }
   if (!props.precheck.summary.can_run) {
-    return `当前不可开始排课，请先处理 ${props.precheck.summary.blocking_issue_count} 个必须项。`
+    return `当前不能开始排课，请先处理 ${props.precheck.summary.blocking_issue_count} 个阻塞项。`
   }
   if (props.precheck.summary.warning_issue_count > 0) {
-    return `基础检查已通过，可以开始试排；建议先留意 ${props.precheck.summary.warning_issue_count} 项优化提示。`
+    return `必需项已通过，可以试排；另有 ${props.precheck.summary.warning_issue_count} 条非阻塞提醒可按需处理。`
   }
-  return '基础检查已通过，可以开始排课。'
+  return '必需项已通过，可以开始试排。'
 })
 
 const averageTeacherHoursDisplay = computed(() => {

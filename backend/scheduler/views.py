@@ -208,36 +208,36 @@ def _build_precheck_payload():
     if not teachers:
         blocking_issues.append(_make_issue(
             'missing_teachers',
-            '未录入教师数据，无法排课',
-            '请先录入至少 1 位任课教师或班主任。',
+            '还没有教师数据，无法分配任课教师或班主任',
+            '请先录入至少 1 位教师。班级中的班主任、授课分配和后续自动分配都会用到教师数据。',
             _make_actions(('去教师管理', '/teachers')),
         ))
     if not classes:
         blocking_issues.append(_make_issue(
             'missing_classes',
-            '未录入班级数据，无法排课',
-            '请先录入需要参与排课的班级。',
+            '还没有班级数据，无法建立班级课表',
+            '请先录入参与排课的班级，并在需要时设置班主任。',
             _make_actions(('去班级管理', '/classes')),
         ))
     if not subjects:
         blocking_issues.append(_make_issue(
             'missing_subjects',
-            '未录入课程数据，无法排课',
-            '请先录入课程周课时和适用年级。',
+            '还没有课程数据，无法计算每班周课时',
+            '请先录入课程周课时、适用年级和课程属性。',
             _make_actions(('去课程管理', '/subjects')),
         ))
     if missing_location_labels:
         blocking_issues.append(_make_issue(
             'missing_locations',
             '存在课程需要专用场地，但场地容量未配置',
-            f"以下场地类型尚未配置容量：{_preview_names(missing_location_labels)}。",
+            f"以下场地类型还没有容量：{_preview_names(missing_location_labels)}。只有普通教室不需要在场地管理中单独配置。",
             _make_actions(('去课程管理', '/subjects'), ('去场地管理', '/locations')),
         ))
     if subjects_without_qualification:
         blocking_issues.append(_make_issue(
             'missing_qualifications',
-            '仍有课程没有可授课教师',
-            f"未设置可授课教师的课程：{_preview_names([subject.name for subject in subjects_without_qualification])}。",
+            '仍有待排课程没有可授课教师',
+            f"以下课程还没有配置教师资质：{_preview_names([subject.name for subject in subjects_without_qualification])}。系统无法为这些课程自动分配教师。",
             _make_actions(('去教师资质', '/qualifications')),
         ))
     if invalid_assignments:
@@ -245,7 +245,7 @@ def _build_precheck_payload():
             'invalid_assignments',
             '存在授课分配与教师资质不一致',
             (
-                '以下分配需要调整：'
+                '以下班级课程当前指定的教师不在该课程资质名单内：'
                 f"{_preview_names([f'{item.school_class.name}-{item.subject.name}-{item.teacher.name}' for item in invalid_assignments])}。"
             ),
             _make_actions(('去授课分配', '/assignments'), ('去教师资质', '/qualifications')),
@@ -257,8 +257,8 @@ def _build_precheck_payload():
         ])
         blocking_issues.append(_make_issue(
             'lock_overflow',
-            '存在课表锁定超过课程周课时上限',
-            f'以下锁定需要调整：{lock_overflow_preview}。',
+            '存在班级课程锁定超出课程周课时',
+            f'以下锁定数量已超过课程周课时：{lock_overflow_preview}。',
             _make_actions(('去课表锁定', '/schedule-locks')),
         ))
 
@@ -267,21 +267,21 @@ def _build_precheck_payload():
         warning_issues.append(_make_issue(
             'missing_assignments',
             f'仍有 {len(missing_assignment_pairs)} 个班级课程未手动指定教师',
-            '系统会在排课时自动分配教师，但建议先确认主科、重点班级和需要固定教师的课程。',
+            '这些普通课程会在排课时按教师资质自动分配。建议先手动确认班主任主课、重点班级和必须固定教师的课程。',
             _make_actions(('去授课分配', '/assignments')),
         ))
     if blocked_times_count == 0:
         warning_issues.append(_make_issue(
             'missing_blocked_times',
             '尚未设置教师禁排时段',
-            '如有外出、教研、跨校或固定不排课安排，建议先补充教师禁排时段。',
+            '如果教师有外出、教研、跨校或固定半天/全天不能上课，请先在“教师禁排”里补充。',
             _make_actions(('去教师禁排', '/blocked-times')),
         ))
     if len(locks) == 0:
         warning_issues.append(_make_issue(
             'missing_locks',
-            '尚未设置课表锁定',
-            '如有班会、固定活动或必须落在指定时间的课程，建议先做课表锁定。',
+            '尚未设置班级课程锁定',
+            '如需将某个班级中已手动指定教师的课程固定到具体时段，可在“课表锁定”中设置；未设置不会阻止排课。',
             _make_actions(('去课表锁定', '/schedule-locks')),
         ))
 
@@ -291,17 +291,17 @@ def _build_precheck_payload():
     steps.append(_make_step(
         'teachers',
         '教师管理',
-        '录入任课教师、班主任和教师基础信息。',
+        '录入教师，并维护送教组、校本课程参与情况和教师周课时范围。',
         'completed' if teachers else 'pending',
-        f"已录入 {len(teachers)} 位教师。" if teachers else '请先录入教师信息。',
+        f"已录入 {len(teachers)} 位教师，可继续设置班主任、送教组和教师约束。" if teachers else '请先录入教师；后续授课分配、班主任和自动分配都会用到。',
         _make_actions(('去教师管理', '/teachers')),
     ))
     steps.append(_make_step(
         'classes',
         '班级管理',
-        '录入班级、年级和班主任对应关系。',
+        '录入班级、年级和班主任；年级会决定哪些课程适用于该班。',
         'completed' if classes else 'pending',
-        f"已录入 {len(classes)} 个班级。" if classes else '请先录入班级信息。',
+        f"已录入 {len(classes)} 个班级，可继续核对班主任和适用课程。" if classes else '请先录入班级；没有班级就无法生成班级课表。',
         _make_actions(('去班级管理', '/classes')),
     ))
 
@@ -310,17 +310,17 @@ def _build_precheck_payload():
         course_step_detail = '请先录入课程信息。'
     elif missing_location_labels:
         course_step_status = 'blocked'
-        course_step_detail = f"以下专用场地尚未配置：{_preview_names(missing_location_labels)}。"
+        course_step_detail = f"以下专用场地类型还没有容量：{_preview_names(missing_location_labels)}。"
     elif locations:
         course_step_status = 'completed'
-        course_step_detail = f"已录入 {len(subjects)} 门课程，{len(locations)} 个场地。"
+        course_step_detail = f"已录入 {len(subjects)} 门课程，已配置 {len(locations)} 个场地；专用场地课程会受容量约束。"
     else:
         course_step_status = 'completed'
-        course_step_detail = f"已录入 {len(subjects)} 门课程；当前课程均可使用普通教室。"
+        course_step_detail = f"已录入 {len(subjects)} 门课程；当前待排课程都可使用普通教室。"
     steps.append(_make_step(
         'subjects_locations',
         '课程与场地',
-        '录入课程周课时、适用年级和专用场地容量。',
+        '录入课程周课时、适用年级、课程属性，并为专用场地课程配置容量。',
         course_step_status,
         course_step_detail,
         _make_actions(('去课程管理', '/subjects'), ('去场地管理', '/locations')),
@@ -331,14 +331,14 @@ def _build_precheck_payload():
         qualification_step_detail = '请先录入班级和课程，再设置可授课教师。'
     elif subjects_without_qualification:
         qualification_step_status = 'blocked'
-        qualification_step_detail = f"仍有 {len(subjects_without_qualification)} 门课程没有可授课教师。"
+        qualification_step_detail = f"仍有 {len(subjects_without_qualification)} 门普通课程没有可授课教师。"
     else:
         qualification_step_status = 'completed'
-        qualification_step_detail = '所有待排课程都已设置可授课教师。'
+        qualification_step_detail = '所有需要进入常规排课的课程都已配置可授课教师。'
     steps.append(_make_step(
         'qualifications',
         '教师资质',
-        '为每门待排课程设置可授课教师。',
+        '为每门普通课程勾选可授课教师，自动分配和校验都会按这里的名单执行。',
         qualification_step_status,
         qualification_step_detail,
         _make_actions(('去教师资质', '/qualifications')),
@@ -349,23 +349,23 @@ def _build_precheck_payload():
         assignment_step_detail = f"有 {len(invalid_assignments)} 条授课分配与教师资质不一致。"
     elif not expected_assignment_pairs_count:
         assignment_step_status = 'pending'
-        assignment_step_detail = '当前还没有需要参与常规排课的班级课程。'
+        assignment_step_detail = '当前还没有需要进入常规排课的班级课程。'
     elif not missing_assignment_pairs:
         assignment_step_status = 'completed'
-        assignment_step_detail = f"已为全部 {expected_assignment_pairs_count} 个班级课程设置教师。"
+        assignment_step_detail = f"已为全部 {expected_assignment_pairs_count} 个班级课程设置任课教师。"
     elif assignment_count == 0:
         assignment_step_status = 'warning'
-        assignment_step_detail = '尚未手动指定教师，系统会在排课时按资质自动分配。'
+        assignment_step_detail = '当前还没有手动指定教师；系统会在排课时按资质自动分配普通课程。'
     else:
         assignment_step_status = 'warning'
         assignment_step_detail = (
-            f"已设置 {assignment_count}/{expected_assignment_pairs_count} 个班级课程教师，"
-            '其余将由系统自动分配。'
+            f"已设置 {assignment_count}/{expected_assignment_pairs_count} 个班级课程的任课教师，"
+            '其余会在排课时按资质自动分配。'
         )
     steps.append(_make_step(
         'assignments',
         '授课分配',
-        '为关键班级和课程指定任课教师，固定分配会优先保留。',
+        '为班级的普通课程指定任课教师；手动指定会保留，未指定的部分可在排课时自动分配。',
         assignment_step_status,
         assignment_step_detail,
         _make_actions(('去授课分配', '/assignments')),
@@ -373,14 +373,14 @@ def _build_precheck_payload():
 
     if blocked_times_count == 0 and len(locks) == 0:
         constraint_step_status = 'warning'
-        constraint_step_detail = '尚未设置教师禁排或课表锁定，如有固定安排建议先补充。'
+        constraint_step_detail = '这两项都不是必填；只有存在明确不可排时段，或需要把某个班级课程固定到具体时段时才需要补充。'
     else:
         constraint_step_status = 'completed'
-        constraint_step_detail = f"已设置 {blocked_times_count} 条禁排时段，{len(locks)} 条课表锁定。"
+        constraint_step_detail = f"已设置 {blocked_times_count} 条教师禁排，{len(locks)} 条班级课程锁定。"
     steps.append(_make_step(
         'constraints',
-        '禁排与锁定',
-        '设置教师禁排时段、固定活动和必须落位的课程。',
+        '教师禁排与班级课程锁定',
+        '教师禁排控制教师某天上/下午或全天不可排；课表锁定用于把已分配的班级课程固定到具体时段。',
         constraint_step_status,
         constraint_step_detail,
         _make_actions(('去教师禁排', '/blocked-times'), ('去课表锁定', '/schedule-locks')),
@@ -388,20 +388,20 @@ def _build_precheck_payload():
 
     if successful_results_count > 0:
         run_step_status = 'completed'
-        run_step_detail = f"已有 {successful_results_count} 个可用排课结果，可继续试排或查看历史。"
+        run_step_detail = f"已存在 {successful_results_count} 个可用排课结果，可继续试排或查看历史结果。"
         run_actions = _make_actions(('查看课表', '/schedule-view'), ('去执行排课', '/schedule-run'))
     elif can_run:
         run_step_status = 'ready'
-        run_step_detail = '基础检查已通过，可以开始排课。'
+        run_step_detail = '阻塞项已清除，可以先执行一次试排，再到课表查看中核对结果。'
         run_actions = _make_actions(('去执行排课', '/schedule-run'))
     else:
         run_step_status = 'blocked'
-        run_step_detail = f"仍有 {len(blocking_issues)} 个必须处理的问题，暂时不能开始排课。"
+        run_step_detail = f"仍有 {len(blocking_issues)} 个阻塞项未处理，暂时不能开始试排。"
         run_actions = _make_actions(('查看排课检查', '/schedule-run'))
     steps.append(_make_step(
         'run',
-        '执行排课',
-        '检查关键数据后开始试排，并查看排课结果。',
+        '试排与结果查看',
+        '先运行一次试排，再到课表查看核对班级表、教师表、校本课程分组和导出结果。',
         run_step_status,
         run_step_detail,
         run_actions,
@@ -412,7 +412,7 @@ def _build_precheck_payload():
         passed_checks.append({
             'key': 'teachers',
             'title': '教师数据已录入',
-            'detail': f'当前共有 {len(teachers)} 位教师。',
+            'detail': f'当前共有 {len(teachers)} 位教师，可用于班主任、授课分配和自动分配。',
         })
     if classes:
         passed_checks.append({
@@ -429,20 +429,20 @@ def _build_precheck_payload():
     if required_subjects and not subjects_without_qualification:
         passed_checks.append({
             'key': 'qualifications',
-            'title': '待排课程资质已覆盖',
-            'detail': '所有待排课程都已配置可授课教师。',
+            'title': '待排普通课程资质已覆盖',
+            'detail': '所有需要进入常规排课的课程都已配置可授课教师。',
         })
     if expected_assignment_pairs_count and not invalid_assignments:
         passed_checks.append({
             'key': 'assignments',
             'title': '现有授课分配与教师资质一致',
-            'detail': '当前授课分配未发现资质冲突。',
+            'detail': '当前没有发现“已分配教师但无该课程资质”的冲突。',
         })
     if not lock_overflows:
         passed_checks.append({
             'key': 'locks',
-            'title': '课表锁定未超出周课时',
-            'detail': '当前锁定数据没有超过课程周课时上限。',
+            'title': '班级课程锁定未超周课时',
+            'detail': '当前每个班级课程的锁定数量都没有超过该课程周课时。',
         })
 
     summary = {

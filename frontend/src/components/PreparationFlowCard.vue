@@ -4,7 +4,9 @@
       <div class="card-header">
         <div>
           <div class="card-title">本学期排课准备</div>
-          <div class="card-subtitle">建议按顺序完成基础数据、约束设置和试排。</div>
+          <div class="card-subtitle">
+            流程卡按当前实现拆分：先补齐教师、班级、课程/场地、资质与授课分配，再按需要补教师禁排或班级课程锁定，最后试排。
+          </div>
         </div>
         <div class="header-tags">
           <el-tag :type="precheck.summary.can_run ? 'success' : 'warning'" effect="light">
