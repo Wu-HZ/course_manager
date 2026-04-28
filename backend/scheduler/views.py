@@ -1,9 +1,15 @@
+from collections import Counter, defaultdict
+
 from django.db import transaction
 from django.db.models import Count, Q
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import api_view, action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from core.models import (
+    ClassSubjectTeacher, Location, ScheduleLock, SchedulerSettings,
+    SchoolClass, Subject, Teacher, TeacherBlockedTime, TeacherQualification
+)
 from .models import ScheduleResult, ScheduleEntry
 from .serializers import (
     ScheduleResultSerializer, ScheduleResultListSerializer,
@@ -56,6 +62,412 @@ def run_schedule(request):
         if result.get('result'):
             data['result_id'] = result['result'].id
         return Response(data, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _preview_names(names, limit=3):
+    names = [name for name in names if name]
+    if not names:
+        return ''
+    if len(names) <= limit:
+        return '、'.join(names)
+    return f"{'、'.join(names[:limit])} 等{len(names)}项"
+
+
+def _make_actions(*items):
+    return [{'label': label, 'route': route} for label, route in items]
+
+
+def _make_issue(key, title, detail, actions):
+    return {
+        'key': key,
+        'title': title,
+        'detail': detail,
+        'actions': actions,
+    }
+
+
+def _make_step(key, title, description, status_value, detail, actions):
+    return {
+        'key': key,
+        'title': title,
+        'description': description,
+        'status': status_value,
+        'detail': detail,
+        'actions': actions,
+    }
+
+
+def _build_precheck_payload():
+    settings = SchedulerSettings.get_settings()
+    class_meeting_name = settings.class_meeting_name
+
+    teachers = list(Teacher.objects.all())
+    classes = list(SchoolClass.objects.all())
+    subjects = list(Subject.objects.all())
+    locations = list(Location.objects.all())
+    assignments = list(
+        ClassSubjectTeacher.objects.select_related('school_class', 'subject', 'teacher').all()
+    )
+    qualifications = list(TeacherQualification.objects.all())
+    locks = list(ScheduleLock.objects.select_related('school_class', 'subject').all())
+
+    blocked_times_count = TeacherBlockedTime.objects.count()
+    successful_results_count = ScheduleResult.objects.filter(
+        solve_status__in=['OPTIMAL', 'FEASIBLE']
+    ).count()
+
+    subject_by_id = {subject.id: subject for subject in subjects}
+    class_by_id = {school_class.id: school_class for school_class in classes}
+    location_labels = dict(Location._meta.get_field('location_type').choices)
+
+    regular_subjects = [
+        subject for subject in subjects
+        if not subject.is_combined_class and subject.name != class_meeting_name
+    ]
+    required_subjects = [
+        subject for subject in regular_subjects
+        if any(subject.is_applicable_for_grade(school_class.grade) for school_class in classes)
+    ]
+
+    qualification_map = defaultdict(set)
+    for qualification in qualifications:
+        qualification_map[qualification.subject_id].add(qualification.teacher_id)
+
+    applicable_pairs = []
+    applicable_pair_keys = set()
+    for school_class in classes:
+        for subject in regular_subjects:
+            if not subject.is_applicable_for_grade(school_class.grade):
+                continue
+            applicable_pairs.append((school_class, subject))
+            applicable_pair_keys.add((school_class.id, subject.id))
+
+    assignment_map = {}
+    for assignment in assignments:
+        key = (assignment.school_class_id, assignment.subject_id)
+        if key in applicable_pair_keys:
+            assignment_map[key] = assignment
+
+    expected_assignment_pairs_count = len(applicable_pairs)
+    assignment_count = len(assignment_map)
+    manual_assignment_count = sum(1 for assignment in assignment_map.values() if assignment.is_manual)
+    auto_assignment_count = assignment_count - manual_assignment_count
+
+    missing_assignment_pairs = [
+        (school_class, subject)
+        for school_class, subject in applicable_pairs
+        if (school_class.id, subject.id) not in assignment_map
+    ]
+    invalid_assignments = [
+        assignment for assignment in assignment_map.values()
+        if assignment.teacher_id not in qualification_map.get(assignment.subject_id, set())
+    ]
+    subjects_without_qualification = [
+        subject for subject in required_subjects
+        if not qualification_map.get(subject.id)
+    ]
+
+    location_capacity = defaultdict(int)
+    for location in locations:
+        location_capacity[location.location_type] += max(location.capacity, 0)
+
+    missing_location_types = sorted({
+        subject.location_type
+        for subject in required_subjects
+        if subject.location_type != 'NORMAL' and location_capacity.get(subject.location_type, 0) <= 0
+    })
+    missing_location_labels = [location_labels.get(code, code) for code in missing_location_types]
+
+    lock_counts = Counter((lock.school_class_id, lock.subject_id) for lock in locks)
+    lock_overflows = []
+    for (class_id, subject_id), count in lock_counts.items():
+        subject = subject_by_id.get(subject_id)
+        school_class = class_by_id.get(class_id)
+        if not subject or not school_class:
+            continue
+        if count > subject.weekly_hours:
+            lock_overflows.append({
+                'class_name': school_class.name,
+                'subject_name': subject.name,
+                'lock_count': count,
+                'weekly_hours': subject.weekly_hours,
+            })
+
+    blocking_issues = []
+    if not teachers:
+        blocking_issues.append(_make_issue(
+            'missing_teachers',
+            '未录入教师数据，无法排课',
+            '请先录入至少 1 位任课教师或班主任。',
+            _make_actions(('去教师管理', '/teachers')),
+        ))
+    if not classes:
+        blocking_issues.append(_make_issue(
+            'missing_classes',
+            '未录入班级数据，无法排课',
+            '请先录入需要参与排课的班级。',
+            _make_actions(('去班级管理', '/classes')),
+        ))
+    if not subjects:
+        blocking_issues.append(_make_issue(
+            'missing_subjects',
+            '未录入课程数据，无法排课',
+            '请先录入课程周课时和适用年级。',
+            _make_actions(('去课程管理', '/subjects')),
+        ))
+    if missing_location_labels:
+        blocking_issues.append(_make_issue(
+            'missing_locations',
+            '存在课程需要专用场地，但场地容量未配置',
+            f"以下场地类型尚未配置容量：{_preview_names(missing_location_labels)}。",
+            _make_actions(('去课程管理', '/subjects'), ('去场地管理', '/locations')),
+        ))
+    if subjects_without_qualification:
+        blocking_issues.append(_make_issue(
+            'missing_qualifications',
+            '仍有课程没有可授课教师',
+            f"未设置可授课教师的课程：{_preview_names([subject.name for subject in subjects_without_qualification])}。",
+            _make_actions(('去教师资质', '/qualifications')),
+        ))
+    if invalid_assignments:
+        blocking_issues.append(_make_issue(
+            'invalid_assignments',
+            '存在授课分配与教师资质不一致',
+            (
+                '以下分配需要调整：'
+                f"{_preview_names([f'{item.school_class.name}-{item.subject.name}-{item.teacher.name}' for item in invalid_assignments])}。"
+            ),
+            _make_actions(('去授课分配', '/assignments'), ('去教师资质', '/qualifications')),
+        ))
+    if lock_overflows:
+        lock_overflow_preview = _preview_names([
+            f"{item['class_name']}-{item['subject_name']} {item['lock_count']}/{item['weekly_hours']}"
+            for item in lock_overflows
+        ])
+        blocking_issues.append(_make_issue(
+            'lock_overflow',
+            '存在课表锁定超过课程周课时上限',
+            f'以下锁定需要调整：{lock_overflow_preview}。',
+            _make_actions(('去课表锁定', '/schedule-locks')),
+        ))
+
+    warning_issues = []
+    if expected_assignment_pairs_count and missing_assignment_pairs:
+        warning_issues.append(_make_issue(
+            'missing_assignments',
+            f'仍有 {len(missing_assignment_pairs)} 个班级课程未手动指定教师',
+            '系统会在排课时自动分配教师，但建议先确认主科、重点班级和需要固定教师的课程。',
+            _make_actions(('去授课分配', '/assignments')),
+        ))
+    if blocked_times_count == 0:
+        warning_issues.append(_make_issue(
+            'missing_blocked_times',
+            '尚未设置教师禁排时段',
+            '如有外出、教研、跨校或固定不排课安排，建议先补充教师禁排时段。',
+            _make_actions(('去教师禁排', '/blocked-times')),
+        ))
+    if len(locks) == 0:
+        warning_issues.append(_make_issue(
+            'missing_locks',
+            '尚未设置课表锁定',
+            '如有班会、固定活动或必须落在指定时间的课程，建议先做课表锁定。',
+            _make_actions(('去课表锁定', '/schedule-locks')),
+        ))
+
+    can_run = len(blocking_issues) == 0
+
+    steps = []
+    steps.append(_make_step(
+        'teachers',
+        '教师管理',
+        '录入任课教师、班主任和教师基础信息。',
+        'completed' if teachers else 'pending',
+        f"已录入 {len(teachers)} 位教师。" if teachers else '请先录入教师信息。',
+        _make_actions(('去教师管理', '/teachers')),
+    ))
+    steps.append(_make_step(
+        'classes',
+        '班级管理',
+        '录入班级、年级和班主任对应关系。',
+        'completed' if classes else 'pending',
+        f"已录入 {len(classes)} 个班级。" if classes else '请先录入班级信息。',
+        _make_actions(('去班级管理', '/classes')),
+    ))
+
+    if not subjects:
+        course_step_status = 'pending'
+        course_step_detail = '请先录入课程信息。'
+    elif missing_location_labels:
+        course_step_status = 'blocked'
+        course_step_detail = f"以下专用场地尚未配置：{_preview_names(missing_location_labels)}。"
+    elif locations:
+        course_step_status = 'completed'
+        course_step_detail = f"已录入 {len(subjects)} 门课程，{len(locations)} 个场地。"
+    else:
+        course_step_status = 'completed'
+        course_step_detail = f"已录入 {len(subjects)} 门课程；当前课程均可使用普通教室。"
+    steps.append(_make_step(
+        'subjects_locations',
+        '课程与场地',
+        '录入课程周课时、适用年级和专用场地容量。',
+        course_step_status,
+        course_step_detail,
+        _make_actions(('去课程管理', '/subjects'), ('去场地管理', '/locations')),
+    ))
+
+    if not subjects or not classes:
+        qualification_step_status = 'pending'
+        qualification_step_detail = '请先录入班级和课程，再设置可授课教师。'
+    elif subjects_without_qualification:
+        qualification_step_status = 'blocked'
+        qualification_step_detail = f"仍有 {len(subjects_without_qualification)} 门课程没有可授课教师。"
+    else:
+        qualification_step_status = 'completed'
+        qualification_step_detail = '所有待排课程都已设置可授课教师。'
+    steps.append(_make_step(
+        'qualifications',
+        '教师资质',
+        '为每门待排课程设置可授课教师。',
+        qualification_step_status,
+        qualification_step_detail,
+        _make_actions(('去教师资质', '/qualifications')),
+    ))
+
+    if invalid_assignments:
+        assignment_step_status = 'blocked'
+        assignment_step_detail = f"有 {len(invalid_assignments)} 条授课分配与教师资质不一致。"
+    elif not expected_assignment_pairs_count:
+        assignment_step_status = 'pending'
+        assignment_step_detail = '当前还没有需要参与常规排课的班级课程。'
+    elif not missing_assignment_pairs:
+        assignment_step_status = 'completed'
+        assignment_step_detail = f"已为全部 {expected_assignment_pairs_count} 个班级课程设置教师。"
+    elif assignment_count == 0:
+        assignment_step_status = 'warning'
+        assignment_step_detail = '尚未手动指定教师，系统会在排课时按资质自动分配。'
+    else:
+        assignment_step_status = 'warning'
+        assignment_step_detail = (
+            f"已设置 {assignment_count}/{expected_assignment_pairs_count} 个班级课程教师，"
+            '其余将由系统自动分配。'
+        )
+    steps.append(_make_step(
+        'assignments',
+        '授课分配',
+        '为关键班级和课程指定任课教师，固定分配会优先保留。',
+        assignment_step_status,
+        assignment_step_detail,
+        _make_actions(('去授课分配', '/assignments')),
+    ))
+
+    if blocked_times_count == 0 and len(locks) == 0:
+        constraint_step_status = 'warning'
+        constraint_step_detail = '尚未设置教师禁排或课表锁定，如有固定安排建议先补充。'
+    else:
+        constraint_step_status = 'completed'
+        constraint_step_detail = f"已设置 {blocked_times_count} 条禁排时段，{len(locks)} 条课表锁定。"
+    steps.append(_make_step(
+        'constraints',
+        '禁排与锁定',
+        '设置教师禁排时段、固定活动和必须落位的课程。',
+        constraint_step_status,
+        constraint_step_detail,
+        _make_actions(('去教师禁排', '/blocked-times'), ('去课表锁定', '/schedule-locks')),
+    ))
+
+    if successful_results_count > 0:
+        run_step_status = 'completed'
+        run_step_detail = f"已有 {successful_results_count} 个可用排课结果，可继续试排或查看历史。"
+        run_actions = _make_actions(('查看课表', '/schedule-view'), ('去执行排课', '/schedule-run'))
+    elif can_run:
+        run_step_status = 'ready'
+        run_step_detail = '基础检查已通过，可以开始排课。'
+        run_actions = _make_actions(('去执行排课', '/schedule-run'))
+    else:
+        run_step_status = 'blocked'
+        run_step_detail = f"仍有 {len(blocking_issues)} 个必须处理的问题，暂时不能开始排课。"
+        run_actions = _make_actions(('查看排课检查', '/schedule-run'))
+    steps.append(_make_step(
+        'run',
+        '执行排课',
+        '检查关键数据后开始试排，并查看排课结果。',
+        run_step_status,
+        run_step_detail,
+        run_actions,
+    ))
+
+    passed_checks = []
+    if teachers:
+        passed_checks.append({
+            'key': 'teachers',
+            'title': '教师数据已录入',
+            'detail': f'当前共有 {len(teachers)} 位教师。',
+        })
+    if classes:
+        passed_checks.append({
+            'key': 'classes',
+            'title': '班级数据已录入',
+            'detail': f'当前共有 {len(classes)} 个班级。',
+        })
+    if subjects:
+        passed_checks.append({
+            'key': 'subjects',
+            'title': '课程数据已录入',
+            'detail': f'当前共有 {len(subjects)} 门课程。',
+        })
+    if required_subjects and not subjects_without_qualification:
+        passed_checks.append({
+            'key': 'qualifications',
+            'title': '待排课程资质已覆盖',
+            'detail': '所有待排课程都已配置可授课教师。',
+        })
+    if expected_assignment_pairs_count and not invalid_assignments:
+        passed_checks.append({
+            'key': 'assignments',
+            'title': '现有授课分配与教师资质一致',
+            'detail': '当前授课分配未发现资质冲突。',
+        })
+    if not lock_overflows:
+        passed_checks.append({
+            'key': 'locks',
+            'title': '课表锁定未超出周课时',
+            'detail': '当前锁定数据没有超过课程周课时上限。',
+        })
+
+    summary = {
+        'teachers_count': len(teachers),
+        'classes_count': len(classes),
+        'subjects_count': len(subjects),
+        'locations_count': len(locations),
+        'assignments_count': assignment_count,
+        'manual_assignments_count': manual_assignment_count,
+        'auto_assignments_count': auto_assignment_count,
+        'qualifications_count': len(qualifications),
+        'blocked_times_count': blocked_times_count,
+        'locks_count': len(locks),
+        'successful_results_count': successful_results_count,
+        'expected_assignment_pairs_count': expected_assignment_pairs_count,
+        'missing_assignment_pairs_count': len(missing_assignment_pairs),
+        'blocking_issue_count': len(blocking_issues),
+        'warning_issue_count': len(warning_issues),
+        'can_run': can_run,
+        'completed_steps': sum(1 for step in steps if step['status'] == 'completed'),
+        'total_steps': len(steps),
+    }
+
+    return {
+        'summary': summary,
+        'steps': steps,
+        'blocking_issues': blocking_issues,
+        'warning_issues': warning_issues,
+        'passed_checks': passed_checks,
+    }
+
+
+@api_view(['GET'])
+def schedule_precheck(request):
+    """返回首页和排课页共用的排课前检查信息"""
+    return Response(_build_precheck_payload())
 
 
 class ScheduleResultViewSet(

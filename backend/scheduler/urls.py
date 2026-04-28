@@ -7,6 +7,7 @@ router.register(r'results', views.ScheduleResultViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('precheck/', views.schedule_precheck, name='schedule-precheck'),
     path('run/', views.run_schedule, name='run-schedule'),
     path('results/<int:pk>/activate/', views.activate_result, name='activate-result'),
     path('active/', views.active_schedule, name='active-schedule'),

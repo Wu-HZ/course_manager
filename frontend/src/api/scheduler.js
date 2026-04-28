@@ -9,6 +9,7 @@ export const runSchedule = (params = {}) => {
   return api.post('/scheduler/run/', data)
 }
 
+export const getSchedulePrecheck = () => api.get('/scheduler/precheck/')
 export const getScheduleResults = (params = {}) =>
   api.get('/scheduler/results/', { params })
 export const getScheduleResult = (id) => api.get(`/scheduler/results/${id}/`)
