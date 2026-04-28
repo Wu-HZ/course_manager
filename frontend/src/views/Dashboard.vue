@@ -60,28 +60,42 @@
     </el-row>
 
     <el-row :gutter="20" class="stats-row">
-      <el-col :xs="12" :lg="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
           <template #header>教师数量</template>
           <div class="stat-number">{{ stats.teachers }}</div>
         </el-card>
       </el-col>
-      <el-col :xs="12" :lg="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
           <template #header>班级数量</template>
           <div class="stat-number">{{ stats.classes }}</div>
         </el-card>
       </el-col>
-      <el-col :xs="12" :lg="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
           <template #header>课程数量</template>
           <div class="stat-number">{{ stats.subjects }}</div>
         </el-card>
       </el-col>
-      <el-col :xs="12" :lg="6">
-        <el-card shadow="hover">
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
           <template #header>授课分配</template>
           <div class="stat-number">{{ stats.assignments }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>校课时量</template>
+          <div class="stat-number">{{ stats.totalSchoolHours }}</div>
+          <div class="stat-caption">含校本课程、班会课</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>人均课时</template>
+          <div class="stat-number">{{ averageTeacherHoursDisplay }}</div>
+          <div class="stat-caption">按全校总课时 / 教师数</div>
         </el-card>
       </el-col>
     </el-row>
@@ -171,7 +185,16 @@ const stats = computed(() => ({
   classes: precheck.value?.summary.classes_count || 0,
   subjects: precheck.value?.summary.subjects_count || 0,
   assignments: precheck.value?.summary.assignments_count || 0,
+  totalSchoolHours: precheck.value?.summary.total_school_hours || 0,
 }))
+
+const averageTeacherHoursDisplay = computed(() => {
+  const value = precheck.value?.summary.average_teacher_hours
+  if (value == null) {
+    return '--'
+  }
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+})
 
 const pendingIssues = computed(() => {
   if (!precheck.value) {
@@ -316,6 +339,21 @@ onMounted(loadDashboardData)
   margin-bottom: 20px;
 }
 
+.stats-row :deep(.el-col) {
+  display: flex;
+}
+
+.stats-card {
+  width: 100%;
+}
+
+.stats-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 112px;
+}
+
 .todo-card {
   height: 100%;
 }
@@ -382,6 +420,14 @@ onMounted(loadDashboardData)
   font-weight: 700;
   color: #409eff;
   text-align: center;
+}
+
+.stat-caption {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  color: #909399;
 }
 
 .quick-actions,

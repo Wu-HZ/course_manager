@@ -19,6 +19,19 @@
     </template>
 
     <template v-if="precheck">
+      <div class="metrics-strip">
+        <div class="metric-item">
+          <div class="metric-label">校课时量</div>
+          <div class="metric-value">{{ precheck.summary.total_school_hours }} 节</div>
+          <div class="metric-tip">含校本课程、班会课</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-label">人均课时</div>
+          <div class="metric-value">{{ averageTeacherHoursDisplay }} 节/人</div>
+          <div class="metric-tip">按全校总课时 / 教师数</div>
+        </div>
+      </div>
+
       <div v-if="precheck.blocking_issues.length" class="section">
         <div class="section-title danger">必须处理</div>
         <div
@@ -125,6 +138,14 @@ const footerText = computed(() => {
   }
   return '基础检查已通过，可以开始排课。'
 })
+
+const averageTeacherHoursDisplay = computed(() => {
+  const value = props.precheck?.summary?.average_teacher_hours
+  if (value == null) {
+    return '--'
+  }
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+})
 </script>
 
 <style scoped>
@@ -154,6 +175,39 @@ const footerText = computed(() => {
 
 .section + .section {
   margin-top: 18px;
+}
+
+.metrics-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metric-item {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f5f7fa;
+  border: 1px solid #ebeef5;
+}
+
+.metric-label {
+  font-size: 13px;
+  color: #606266;
+}
+
+.metric-value {
+  margin-top: 6px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.metric-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
 }
 
 .section-title {
@@ -266,6 +320,7 @@ const footerText = computed(() => {
     align-items: stretch;
   }
 
+  .metrics-strip,
   .passed-grid {
     grid-template-columns: 1fr;
   }

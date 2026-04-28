@@ -142,6 +142,17 @@ def _build_precheck_payload():
             applicable_pairs.append((school_class, subject))
             applicable_pair_keys.add((school_class.id, subject.id))
 
+    total_school_hours = 0
+    for school_class in classes:
+        for subject in subjects:
+            if not subject.is_applicable_for_grade(school_class.grade):
+                continue
+            total_school_hours += subject.weekly_hours
+
+    average_teacher_hours = None
+    if teachers:
+        average_teacher_hours = round(total_school_hours / len(teachers), 1)
+
     assignment_map = {}
     for assignment in assignments:
         key = (assignment.school_class_id, assignment.subject_id)
@@ -453,6 +464,8 @@ def _build_precheck_payload():
         'can_run': can_run,
         'completed_steps': sum(1 for step in steps if step['status'] == 'completed'),
         'total_steps': len(steps),
+        'total_school_hours': total_school_hours,
+        'average_teacher_hours': average_teacher_hours,
     }
 
     return {
