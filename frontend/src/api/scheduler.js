@@ -6,7 +6,10 @@ export const runSchedule = (params = {}) => {
     max_attempts: params.maxAttempts || 50,
     total_timeout_seconds: params.totalTimeout || 600,
   }
-  return api.post('/scheduler/run/', data)
+  return api.post('/scheduler/run/', data, {
+    // 排课可能持续很久，这里交给后端 total_timeout_seconds 控制结束时机。
+    timeout: 0,
+  })
 }
 
 export const getSchedulePrecheck = () => api.get('/scheduler/precheck/')

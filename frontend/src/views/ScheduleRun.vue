@@ -40,7 +40,7 @@
       </el-form>
     </el-card>
 
-    <el-card v-if="result" class="result-card" :class="resultClass">
+    <el-card ref="resultCardRef" v-if="result" class="result-card" :class="resultClass">
       <template #header>排课结果</template>
       <el-descriptions :column="2" border>
         <el-descriptions-item label="结果名称">
@@ -117,12 +117,54 @@
         @update:model-value="onHistorySelect"
       />
     </el-card>
+
+    <el-dialog
+      v-model="completionDialogVisible"
+      :title="completionDialogTitle"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <div class="completion-dialog">
+        <div class="completion-dialog__status">
+          <span class="completion-dialog__label">结果状态</span>
+          <el-tag :type="statusType" effect="dark">{{ statusText }}</el-tag>
+        </div>
+        <p class="completion-dialog__description">{{ completionDialogDescription }}</p>
+        <div class="completion-dialog__meta">
+          <div class="completion-dialog__meta-item">
+            <span class="completion-dialog__meta-label">结果名称</span>
+            <strong>{{ completionResultName }}</strong>
+          </div>
+          <div class="completion-dialog__meta-item">
+            <span class="completion-dialog__meta-label">总耗时</span>
+            <strong>{{ completionSolveTimeText }}</strong>
+          </div>
+          <div class="completion-dialog__meta-item" v-if="autoAssignedCount !== null">
+            <span class="completion-dialog__meta-label">自动分配</span>
+            <strong>{{ autoAssignedCount }} 节</strong>
+          </div>
+          <div class="completion-dialog__meta-item" v-if="retryStats?.attempts">
+            <span class="completion-dialog__meta-label">尝试次数</span>
+            <strong>{{ retryStats.attempts }} 次</strong>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="completionDialogVisible = false">
+          {{ completionDialogMode === 'success' ? '稍后查看' : '关闭' }}
+        </el-button>
+        <el-button type="primary" @click="handleCompletionPrimaryAction">
+          {{ completionDialogPrimaryText }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 import SchedulePrecheckPanel from '../components/SchedulePrecheckPanel.vue'
 import { getSchedulePrecheck, getScheduleResult, runSchedule as runScheduleApi } from '../api/scheduler'
 import {
@@ -142,8 +184,13 @@ const diagnostics = ref([])
 const autoAssignedCount = ref(null)
 const retryStats = ref(null)
 const pickerRef = ref(null)
+const resultCardRef = ref(null)
 const precheck = ref(null)
 const precheckLoading = ref(false)
+const completionDialogVisible = ref(false)
+const completionDialogMode = ref('success')
+const lastSolveTimeMs = ref(0)
+const router = useRouter()
 
 const statusText = computed(() => getScheduleResultStatusText(result.value?.solve_status))
 const statusType = computed(() => getScheduleResultStatusType(result.value?.solve_status))
@@ -154,6 +201,68 @@ const resultClass = computed(() => {
   }
   return 'success'
 })
+const completionDialogTitle = computed(() => (
+  completionDialogMode.value === 'success' ? '排课完成' : '排课已结束'
+))
+const completionDialogPrimaryText = computed(() => (
+  completionDialogMode.value === 'success' ? '查看课表' : '查看结果详情'
+))
+const completionResultName = computed(() => {
+  if (!result.value) {
+    return '本次求解'
+  }
+  if (result.value.display_name || result.value.id) {
+    return getScheduleResultDisplayName(result.value)
+  }
+  return '本次求解'
+})
+const completionSolveTimeText = computed(() => {
+  const solveTimeMs = result.value?.solve_time_ms ?? lastSolveTimeMs.value
+  return solveTimeMs ? `${solveTimeMs} ms` : '未返回'
+})
+const completionDialogDescription = computed(() => {
+  const status = result.value?.solve_status
+  if (completionDialogMode.value === 'success') {
+    if (status === 'OPTIMAL') {
+      return '已生成最优课表，可以立即进入课表查看页核对结果。'
+    }
+    if (status === 'FEASIBLE') {
+      return '已生成可用课表，可以立即进入课表查看页继续检查。'
+    }
+    return '已生成排课结果，可以立即进入课表查看页查看。'
+  }
+
+  if (status === 'INFEASIBLE') {
+    return '本次求解已结束，但当前约束下未找到可行课表。请查看下方错误信息和诊断分析。'
+  }
+  if (status === 'FAILED_ALL_ATTEMPTS') {
+    return '本次求解已结束，但所有尝试都未生成可用课表。请查看失败原因和诊断分析。'
+  }
+  if (status === 'MODEL_INVALID') {
+    return '本次求解已结束，但模型配置存在问题，未生成可用课表。请查看下方诊断信息。'
+  }
+  return '本次求解已结束，但未生成可用课表。请查看当前页面的结果信息。'
+})
+
+const openCompletionDialog = (mode) => {
+  completionDialogMode.value = mode
+  completionDialogVisible.value = true
+}
+
+const scrollToResultCard = async () => {
+  completionDialogVisible.value = false
+  await nextTick()
+  resultCardRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const handleCompletionPrimaryAction = async () => {
+  if (completionDialogMode.value === 'success') {
+    completionDialogVisible.value = false
+    await router.push('/schedule-view')
+    return
+  }
+  await scrollToResultCard()
+}
 
 const loadPrecheck = async () => {
   precheckLoading.value = true
@@ -189,11 +298,13 @@ const runSchedule = async () => {
   }
 
   running.value = true
+  completionDialogVisible.value = false
   result.value = null
   errors.value = []
   diagnostics.value = []
   autoAssignedCount.value = null
   retryStats.value = null
+  lastSolveTimeMs.value = 0
 
   try {
     const res = await runScheduleApi({
@@ -204,11 +315,13 @@ const runSchedule = async () => {
     result.value = res.result
     autoAssignedCount.value = res.auto_assigned_count || 0
     retryStats.value = res.retry_stats || null
+    lastSolveTimeMs.value = res.solve_time_ms || res.result?.solve_time_ms || 0
     if (!res.success) {
       errors.value = res.errors || []
       diagnostics.value = res.diagnostics || []
     }
     ElMessage.success('排课完成')
+    openCompletionDialog(res.success === false ? 'failure' : 'success')
     pickerRef.value?.refresh()
   } catch (error) {
     if (error.response?.data) {
@@ -217,7 +330,9 @@ const runSchedule = async () => {
       diagnostics.value = error.response.data.diagnostics || []
       autoAssignedCount.value = error.response.data.auto_assigned_count || null
       retryStats.value = error.response.data.retry_stats || null
+      lastSolveTimeMs.value = error.response.data.solve_time_ms || 0
       ElMessage.error('排课失败')
+      openCompletionDialog('failure')
     } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       errors.value = ['请求超时，请稍后刷新页面查看历史记录。']
       ElMessage.error('请求超时，后台可能仍在计算')
@@ -331,5 +446,43 @@ onMounted(loadPrecheck)
 .failure-reasons li {
   margin-bottom: 4px;
   color: #606266;
+}
+
+.completion-dialog__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.completion-dialog__label,
+.completion-dialog__meta-label {
+  color: #909399;
+  font-size: 13px;
+}
+
+.completion-dialog__description {
+  margin: 16px 0;
+  color: #303133;
+  line-height: 1.7;
+}
+
+.completion-dialog__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.completion-dialog__meta-item {
+  padding: 12px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
+.completion-dialog__meta-item strong {
+  display: block;
+  margin-top: 6px;
+  color: #303133;
+  line-height: 1.5;
 }
 </style>
