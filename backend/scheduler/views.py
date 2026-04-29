@@ -294,14 +294,6 @@ def _build_precheck_payload():
             '如果教师有外出、教研、跨校或固定半天/全天不能上课，请先在“教师禁排”里补充。',
             _make_actions(('去教师禁排', '/blocked-times')),
         ))
-    if len(locks) == 0:
-        warning_issues.append(_make_issue(
-            'missing_locks',
-            '尚未设置班级课程锁定',
-            '如需将某个班级中已手动指定教师的课程固定到具体时段，可在“课表锁定”中设置；未设置不会阻止排课。',
-            _make_actions(('去课表锁定', '/schedule-locks')),
-        ))
-
     can_run = len(blocking_issues) == 0
 
     steps = []
@@ -451,27 +443,6 @@ def _build_precheck_payload():
         assignment_step_detail,
         _make_actions(('去授课分配', '/assignments')),
     ))
-    if not classes or not subjects:
-        locks_step_status = 'pending'
-        locks_step_detail = '请先补齐班级和课程，再决定是否需要锁定具体时段。'
-    elif manual_assignment_count == 0:
-        locks_step_status = 'pending'
-        locks_step_detail = '先在“授课分配”中手动指定至少一部分班级课程，课表锁定页才会出现可锁定项目。'
-    elif len(locks) == 0:
-        locks_step_status = 'warning'
-        locks_step_detail = '当前还没有班级课程锁定；只有需要把已分配课程固定到具体时段时才需要设置。'
-    else:
-        locks_step_status = 'completed'
-        locks_step_detail = f"已设置 {len(locks)} 条班级课程锁定。"
-    steps.append(_make_step(
-        'locks',
-        '课表锁定',
-        '把某个班里已手动分配教师的课程固定到具体时段；不是给教师整天空位上锁。',
-        locks_step_status,
-        locks_step_detail,
-        _make_actions(('去课表锁定', '/schedule-locks')),
-    ))
-
     if successful_results_count > 0:
         run_step_status = 'completed'
         run_step_detail = f"已执行过试排，当前已有 {successful_results_count} 个可用排课结果。"
@@ -541,7 +512,7 @@ def _build_precheck_payload():
             'title': '现有授课分配与教师资质一致',
             'detail': '当前没有发现“已分配教师但无该课程资质”的冲突。',
         })
-    if not lock_overflows:
+    if locks and not lock_overflows:
         passed_checks.append({
             'key': 'locks',
             'title': '班级课程锁定未超周课时',
