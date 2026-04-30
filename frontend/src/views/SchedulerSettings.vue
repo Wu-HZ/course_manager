@@ -1,91 +1,74 @@
 <template>
-  <div class="page-container">
+  <div class="settings-page" v-loading="loading">
     <div class="page-header">
-      <h2>排课参数设置</h2>
-      <el-button type="warning" @click="handleReset">恢复默认值</el-button>
+      <div>
+        <h2>排课参数设置</h2>
+        <p class="page-subtitle">
+          这些参数会影响排课规则与评分方式。一般保持默认即可；保存后仅影响后续排课，不会改动已有结果。
+        </p>
+      </div>
+      <div class="page-header__actions">
+        <el-button plain @click="handleReset">恢复默认值</el-button>
+        <el-button type="primary" @click="handleSave" :loading="saving">保存设置</el-button>
+      </div>
     </div>
 
-    <el-form :model="form" label-width="180px" v-loading="loading">
-      <!-- 基础配置 -->
-      <el-divider content-position="left">基础配置</el-divider>
+    <div class="summary-strip">
+      <div class="summary-strip__text">重点关注班会课程名、合班课时段、连堂边界和软约束权重。</div>
+      <div class="summary-strip__stats">
+        <span v-for="item in overviewStats" :key="item.label" class="summary-chip">
+          <strong>{{ item.value }}</strong>
+          <span>{{ item.label }}</span>
+        </span>
+      </div>
+    </div>
 
-      <el-form-item label="班会课程名">
-        <el-input v-model="form.class_meeting_name" style="width: 200px" />
-        <div class="help-text">班会课的课程名称，如"班会"、"班队会"、"主题班会"等</div>
-      </el-form-item>
+    <div class="section-stack">
+      <section v-for="section in sections" :key="section.key" class="section-card">
+        <div class="section-header">
+          <div>
+            <div class="section-title">{{ section.title }}</div>
+            <div class="section-subtitle">{{ section.subtitle }}</div>
+          </div>
+          <el-tag size="small" effect="plain" round>{{ section.fields.length }} 项</el-tag>
+        </div>
 
-      <el-form-item label="合班课时段">
-        <el-input v-model="form.combined_class_slots" style="width: 300px" />
-        <div class="help-text">格式"星期,节次"用分号分隔，如"1,4;1,5;3,4;3,5"表示周二和周四下午（星期从0=周一开始，节次从0开始）</div>
-      </el-form-item>
+        <div class="field-grid" :class="section.gridClass">
+          <div
+            v-for="field in section.fields"
+            :key="field.key"
+            class="field-card"
+            :class="field.spanClass"
+          >
+            <div class="field-card__head">
+              <div class="field-card__code">{{ field.code }}</div>
+              <div class="field-card__label">{{ field.label }}</div>
+            </div>
 
-      <el-form-item label="求解器线程数">
-        <el-input-number v-model="form.solver_num_workers" :min="1" :max="16" />
-        <div class="help-text">并行计算的线程数，建议设为CPU核心数</div>
-      </el-form-item>
+            <div class="field-card__control">
+              <el-input
+                v-if="field.type === 'text'"
+                v-model="form[field.key]"
+                :placeholder="field.placeholder || ''"
+                clearable
+              />
+              <div v-else class="number-control">
+                <el-input-number
+                  v-model="form[field.key]"
+                  :min="field.min"
+                  :max="field.max"
+                  controls-position="right"
+                />
+                <span v-if="field.unit" class="field-card__unit">{{ field.unit }}</span>
+              </div>
+            </div>
 
-      <!-- 硬约束参数 -->
-      <el-divider content-position="left">硬约束参数</el-divider>
-
-      <el-form-item label="连堂禁跨节次对">
-        <el-input v-model="form.h9_consecutive_forbidden" style="width: 200px" />
-        <div class="help-text">格式如"1,2;3,4"表示第2-3节和第4-5节之间禁止连堂（0起始，用分号分隔多组）</div>
-      </el-form-item>
-
-      <el-form-item label="教师同班单日上限">
-        <el-input-number v-model="form.h11_teacher_class_daily_max" :min="1" :max="6" />
-        <span class="unit">节</span>
-        <div class="help-text">同一教师同一天在同一班级最多上几节课</div>
-      </el-form-item>
-
-      <!-- 软约束权重 -->
-      <el-divider content-position="left">软约束权重（数值越大越重要）</el-divider>
-
-      <el-form-item label="S1 上午优先权重">
-        <el-input-number v-model="form.s1_am_preference_weight" :min="0" :max="100" />
-        <div class="help-text">标记"上午优先"的课程排在上午的奖励分</div>
-      </el-form-item>
-
-      <el-form-item label="S2 连堂偏好权重">
-        <el-input-number v-model="form.s2_consecutive_weight" :min="0" :max="100" />
-        <div class="help-text">允许连堂的课程连续排列的奖励分</div>
-      </el-form-item>
-
-      <el-form-item label="S3 分布均匀权重">
-        <el-input-number v-model="form.s3_distribution_weight" :min="0" :max="100" />
-        <div class="help-text">同课同班同天超过1节的惩罚分</div>
-      </el-form-item>
-
-      <el-form-item label="S4 教师日负载阈值">
-        <el-input-number v-model="form.s4_teacher_daily_threshold" :min="1" :max="6" />
-        <span class="unit">节</span>
-        <div class="help-text">教师单日课时超过此值开始惩罚</div>
-      </el-form-item>
-
-      <el-form-item label="S4 教师日负载权重">
-        <el-input-number v-model="form.s4_teacher_daily_weight" :min="0" :max="100" />
-        <div class="help-text">教师单日课时超出阈值的惩罚分</div>
-      </el-form-item>
-
-      <el-form-item label="S5 避免第一节权重">
-        <el-input-number v-model="form.s5_avoid_first_weight" :min="0" :max="100" />
-        <div class="help-text">标记"避免第一节"的课程排在第一节的惩罚分</div>
-      </el-form-item>
-
-      <el-form-item label="S6 换班惩罚权重">
-        <el-input-number v-model="form.s6_subject_switch_weight" :min="0" :max="100" />
-        <div class="help-text">教师连续两节在不同班级上课的惩罚分</div>
-      </el-form-item>
-
-      <el-form-item label="S7 同班换科惩罚权重">
-        <el-input-number v-model="form.s7_same_class_subject_switch_weight" :min="0" :max="100" />
-        <div class="help-text">教师连续两节在同一班级但上不同科目的惩罚分</div>
-      </el-form-item>
-
-      <el-form-item>
-        <el-button type="primary" @click="handleSave" :loading="saving">保存设置</el-button>
-      </el-form-item>
-    </el-form>
+            <div class="field-card__help">{{ field.help }}</div>
+            <div v-if="field.note" class="field-card__note">{{ field.note }}</div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -93,6 +76,164 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+
+const basicFields = [
+  {
+    key: 'class_meeting_name',
+    code: 'BASE-1',
+    label: '班会课程名',
+    type: 'text',
+    help: '用于识别应由班主任承担的班会课程。',
+    note: '例如：班会、班队会、主题班会。',
+  },
+  {
+    key: 'combined_class_slots',
+    code: 'BASE-2',
+    label: '合班课时段',
+    type: 'text',
+    spanClass: 'field-card--span-2',
+    help: '定义校本课程或合班课允许使用的固定时段。',
+    note: '格式示例：1,4;1,5;3,4;3,5。星期从 0=周一开始，节次从 0 开始。',
+  },
+  {
+    key: 'solver_num_workers',
+    code: 'BASE-3',
+    label: '求解器线程数',
+    type: 'number',
+    min: 1,
+    max: 16,
+    help: '控制排课时并行计算使用的线程数量。',
+    note: '通常建议接近机器可用 CPU 核心数。',
+  },
+]
+
+const hardConstraintFields = [
+  {
+    key: 'h9_consecutive_forbidden',
+    code: 'H9',
+    label: '连堂禁止跨节边界',
+    type: 'text',
+    help: '限制连堂课不能跨过哪些节次边界。',
+    note: '格式示例：1,2;3,4，表示第 2-3 节和第 4-5 节之间禁止组成连堂。',
+  },
+  {
+    key: 'h11_teacher_class_daily_max',
+    code: 'H11',
+    label: '教师同班单日上限',
+    type: 'number',
+    min: 1,
+    max: 6,
+    unit: '节',
+    help: '同一教师同一天在同一班级最多可上几节课。',
+    note: '过小会增加排课难度，过大则可能让课表过于集中。',
+  },
+]
+
+const preferenceFields = [
+  {
+    key: 's1_am_preference_weight',
+    code: 'S1',
+    label: '上午优先权重',
+    type: 'number',
+    min: 0,
+    max: 100,
+    help: '“上午优先”课程排在上午时获得的奖励分。',
+  },
+  {
+    key: 's2_consecutive_weight',
+    code: 'S2',
+    label: '连堂偏好权重',
+    type: 'number',
+    min: 0,
+    max: 100,
+    help: '允许连堂的课程连续排布时获得的奖励分。',
+  },
+  {
+    key: 's3_distribution_weight',
+    code: 'S3',
+    label: '分布均匀权重',
+    type: 'number',
+    min: 0,
+    max: 100,
+    help: '同课同班同一天超过 1 节时施加的惩罚分。',
+  },
+  {
+    key: 's4_teacher_daily_threshold',
+    code: 'S4-A',
+    label: '教师日负载阈值',
+    type: 'number',
+    min: 1,
+    max: 6,
+    unit: '节',
+    help: '教师单日课时超过该值后，才开始计算日负载惩罚。',
+  },
+  {
+    key: 's4_teacher_daily_weight',
+    code: 'S4-B',
+    label: '教师日负载权重',
+    type: 'number',
+    min: 0,
+    max: 100,
+    help: '教师单日课时超出阈值部分对应的惩罚分。',
+  },
+  {
+    key: 's5_avoid_first_weight',
+    code: 'S5',
+    label: '避免第一节权重',
+    type: 'number',
+    min: 0,
+    max: 100,
+    help: '“避免第一节”课程排在第一节时施加的惩罚分。',
+  },
+  {
+    key: 's6_subject_switch_weight',
+    code: 'S6',
+    label: '换班惩罚权重',
+    type: 'number',
+    min: 0,
+    max: 100,
+    help: '教师连续两节在不同班级上课时施加的惩罚分。',
+  },
+  {
+    key: 's7_same_class_subject_switch_weight',
+    code: 'S7',
+    label: '同班换科惩罚权重',
+    type: 'number',
+    min: 0,
+    max: 100,
+    help: '教师连续两节在同一班级但教授不同科目时施加的惩罚分。',
+  },
+]
+
+const sections = [
+  {
+    key: 'basic',
+    title: '基础配置',
+    subtitle: '决定班会识别、合班课时段以及求解器并行方式。',
+    gridClass: 'field-grid--basic',
+    fields: basicFields,
+  },
+  {
+    key: 'constraints',
+    title: '硬约束参数',
+    subtitle: '必须满足的限制，调整后会直接影响是否能够排通。',
+    gridClass: 'field-grid--constraints',
+    fields: hardConstraintFields,
+  },
+  {
+    key: 'preferences',
+    title: '软约束权重',
+    subtitle: '只在多个方案都可行时参与评分，数值越大，系统越重视该偏好。',
+    gridClass: 'field-grid--preferences',
+    fields: preferenceFields,
+  },
+]
+
+const overviewStats = [
+  { label: '基础配置', value: basicFields.length },
+  { label: '硬约束', value: hardConstraintFields.length },
+  { label: '软约束', value: preferenceFields.length },
+]
 
 const loading = ref(false)
 const saving = ref(false)
@@ -109,7 +250,7 @@ const form = ref({
   s4_teacher_daily_weight: 8,
   s5_avoid_first_weight: 6,
   s6_subject_switch_weight: 5,
-  s7_same_class_subject_switch_weight: 3
+  s7_same_class_subject_switch_weight: 3,
 })
 
 const loadSettings = async () => {
@@ -137,7 +278,7 @@ const handleSave = async () => {
 }
 
 const handleReset = async () => {
-  await ElMessageBox.confirm('确定恢复所有参数为默认值?', '提示', { type: 'warning' })
+  await ElMessageBox.confirm('确定恢复所有参数为默认值？', '提示', { type: 'warning' })
   try {
     const data = await api.post('/scheduler-settings/reset/')
     form.value = data
@@ -151,9 +292,238 @@ onMounted(loadSettings)
 </script>
 
 <style scoped>
-.page-container { background: #fff; padding: 20px; border-radius: 4px; max-width: 800px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.page-header h2 { margin: 0; }
-.help-text { color: #909399; font-size: 12px; margin-top: 5px; }
-.unit { margin-left: 10px; color: #606266; }
+.settings-page {
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.page-header h2 {
+  margin: 0;
+  color: #303133;
+}
+
+.page-subtitle {
+  margin: 6px 0 0;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #606266;
+}
+
+.page-header__actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.summary-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 14px;
+  background: #fafbfd;
+}
+
+.summary-strip__text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+}
+
+.summary-strip__stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid #e4eaf1;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+  color: #606266;
+  white-space: nowrap;
+}
+
+.summary-chip strong {
+  font-size: 14px;
+  color: #2f5f8a;
+}
+
+.section-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.section-card {
+  border: 1px solid #ebeef5;
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f0f3f7;
+  background: #fbfcfe;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.section-subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+}
+
+.field-grid {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.field-grid--basic,
+.field-grid--constraints {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-grid--preferences {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.field-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #edf1f6;
+  border-radius: 12px;
+  background: #fcfdff;
+}
+
+.field-card--span-2 {
+  grid-column: span 2;
+}
+
+.field-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-card__code {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef3f8;
+  font-size: 12px;
+  font-weight: 700;
+  color: #6f8399;
+}
+
+.field-card__label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.field-card__control :deep(.el-input),
+.field-card__control :deep(.el-input-number) {
+  width: 100%;
+}
+
+.number-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.field-card__unit {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #606266;
+}
+
+.field-card__help {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #606266;
+}
+
+.field-card__note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #909399;
+}
+
+@media (max-width: 1280px) {
+  .field-grid--preferences {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .field-grid--basic,
+  .field-grid--constraints,
+  .field-grid--preferences {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .settings-page {
+    padding: 16px;
+  }
+
+  .page-header,
+  .page-header__actions,
+  .summary-strip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .field-grid--basic,
+  .field-grid--constraints,
+  .field-grid--preferences {
+    grid-template-columns: 1fr;
+  }
+
+  .field-card--span-2 {
+    grid-column: auto;
+  }
+
+  .field-grid,
+  .section-header {
+    padding: 14px;
+  }
+}
 </style>
