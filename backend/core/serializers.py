@@ -85,6 +85,22 @@ class ClassSubjectTeacherSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='subject.name', read_only=True)
     teacher_name = serializers.CharField(source='teacher.name', read_only=True)
 
+    def validate(self, attrs):
+        school_class = attrs.get('school_class') or getattr(self.instance, 'school_class', None)
+        subject = attrs.get('subject') or getattr(self.instance, 'subject', None)
+
+        if subject and not is_subject_qualification_managed(subject):
+            raise serializers.ValidationError({
+                'subject': '班会和校本课程不在授课分配中设置。'
+            })
+
+        if school_class and subject and not subject.is_applicable_for_grade(school_class.grade):
+            raise serializers.ValidationError({
+                'subject': f'{subject.name} 不适用于 {school_class.name} 所在年级。'
+            })
+
+        return attrs
+
     class Meta:
         model = ClassSubjectTeacher
         fields = '__all__'

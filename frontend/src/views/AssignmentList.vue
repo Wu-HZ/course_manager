@@ -11,10 +11,11 @@
 
     <el-alert type="info" :closable="false" style="margin-bottom: 20px">
       <div class="legend">
-        <span>点击单元格指定教师：</span>
+        <span>这里只分配普通课程；班会由班主任承担，不适用当前班级年级的课程不可分配：</span>
         <span class="legend-item"><span class="cell-demo manual"></span> 手动指定（固定）</span>
         <span class="legend-item"><span class="cell-demo auto"></span> 自动分配</span>
         <span class="legend-item"><span class="cell-demo empty"></span> 未分配</span>
+        <span class="legend-item"><span class="cell-demo unavailable"></span> 不适用</span>
       </div>
     </el-alert>
 
@@ -35,10 +36,13 @@
             <td
               v-for="c in classes"
               :key="`${subject.id}-${c.id}`"
-              :class="getCellClass(c.id, subject.id)"
-              @click="handleCellClick(c.id, subject.id)"
+              :class="getCellClass(c, subject)"
+              @click="handleCellClick(c, subject)"
             >
-              <template v-if="getAssignment(c.id, subject.id)">
+              <template v-if="!isSubjectApplicableToClass(subject, c)">
+                <span class="unavailable-cell">—</span>
+              </template>
+              <template v-else-if="getAssignment(c.id, subject.id)">
                 <div class="cell-content">
                   <span class="teacher-name">{{ getAssignment(c.id, subject.id).teacher_name }}</span>
                 </div>
@@ -106,21 +110,58 @@ const classes = ref([])
 const subjects = ref([])
 const teachers = ref([])
 const qualifications = ref([])
+const classMeetingName = ref('班会')
 const dialogVisible = ref(false)
 const editingId = ref(null)
 const currentClassId = ref(null)
 const currentSubjectId = ref(null)
 const form = ref({ teacher: null, is_manual: true })
 
-// 过滤掉班会课和校本课程
+const getApplicableGrades = (subject) => {
+  if (!subject?.applicable_grades) return []
+  return String(subject.applicable_grades)
+    .split(',')
+    .map(item => Number(item.trim()))
+    .filter(Number.isInteger)
+}
+
+const isManagedAssignmentSubject = (subject) => (
+  Boolean(subject) &&
+  !subject.is_combined_class &&
+  subject.name !== classMeetingName.value
+)
+
+const isSubjectApplicableToClass = (subject, schoolClass) => {
+  if (!subject || !schoolClass) return false
+  const grades = getApplicableGrades(subject)
+  return grades.length === 0 || grades.includes(schoolClass.grade)
+}
+
+// 过滤掉班会课、校本课程和对当前所有班级都不适用的课程
 const filteredSubjects = computed(() => {
-  return subjects.value.filter(s => !s.is_combined_class && s.name !== '班会课')
+  return subjects.value.filter(subject => (
+    isManagedAssignmentSubject(subject) &&
+    classes.value.some(schoolClass => isSubjectApplicableToClass(subject, schoolClass))
+  ))
 })
+
+const classById = computed(() => Object.fromEntries(
+  classes.value.map(schoolClass => [schoolClass.id, schoolClass])
+))
+
+const subjectById = computed(() => Object.fromEntries(
+  subjects.value.map(subject => [subject.id, subject])
+))
 
 // 构建分配映射表
 const assignmentMap = computed(() => {
   const map = {}
   for (const a of assignments.value) {
+    const schoolClass = classById.value[a.school_class]
+    const subject = subjectById.value[a.subject]
+    if (!isManagedAssignmentSubject(subject) || !isSubjectApplicableToClass(subject, schoolClass)) {
+      continue
+    }
     map[`${a.school_class}-${a.subject}`] = a
   }
   return map
@@ -132,8 +173,11 @@ const getAssignment = (classId, subjectId) => {
 }
 
 // 获取单元格样式
-const getCellClass = (classId, subjectId) => {
-  const a = getAssignment(classId, subjectId)
+const getCellClass = (schoolClass, subject) => {
+  if (!isSubjectApplicableToClass(subject, schoolClass)) {
+    return 'cell unavailable'
+  }
+  const a = getAssignment(schoolClass.id, subject.id)
   if (!a) return 'cell empty'
   return a.is_manual ? 'cell manual' : 'cell auto'
 }
@@ -166,13 +210,20 @@ const qualifiedTeachers = computed(() => {
 
 const loadData = async () => {
   try {
-    [assignments.value, classes.value, subjects.value, teachers.value, qualifications.value] = await Promise.all([
+    const [assignmentList, classList, subjectList, teacherList, qualificationList, settings] = await Promise.all([
       getAssignments(),
       getClasses(),
       getSubjects(),
       getTeachers(),
-      api.get('/teacher-qualifications/')
+      api.get('/teacher-qualifications/'),
+      api.get('/scheduler-settings/'),
     ])
+    assignments.value = assignmentList
+    classes.value = classList
+    subjects.value = subjectList
+    teachers.value = teacherList
+    qualifications.value = qualificationList
+    classMeetingName.value = settings.class_meeting_name || '班会'
   } catch (e) {
     console.error('加载数据失败:', e)
     ElMessage.error('加载数据失败')
@@ -180,11 +231,15 @@ const loadData = async () => {
 }
 
 // 点击单元格
-const handleCellClick = (classId, subjectId) => {
-  currentClassId.value = classId
-  currentSubjectId.value = subjectId
+const handleCellClick = (schoolClass, subject) => {
+  if (!isManagedAssignmentSubject(subject) || !isSubjectApplicableToClass(subject, schoolClass)) {
+    return
+  }
 
-  const existing = getAssignment(classId, subjectId)
+  currentClassId.value = schoolClass.id
+  currentSubjectId.value = subject.id
+
+  const existing = getAssignment(schoolClass.id, subject.id)
   if (existing) {
     editingId.value = existing.id
     form.value = {
@@ -218,7 +273,8 @@ const handleSave = async () => {
     dialogVisible.value = false
     loadData()
   } catch (e) {
-    ElMessage.error('操作失败')
+    const detail = e.response?.data?.subject?.[0] || e.response?.data?.detail
+    ElMessage.error(detail || '操作失败')
   }
 }
 
@@ -278,6 +334,7 @@ onMounted(loadData)
 .cell-demo.manual { background: #409eff; }
 .cell-demo.auto { background: #67c23a; }
 .cell-demo.empty { background: #f5f7fa; }
+.cell-demo.unavailable { background: #eef1f5; }
 
 .grid-container {
   overflow-x: auto;
@@ -339,6 +396,17 @@ onMounted(loadData)
   color: #fff;
 }
 
+.cell.unavailable {
+  background: #f2f4f7;
+  color: #c0c4cc;
+  cursor: not-allowed;
+}
+
+.cell.unavailable:hover {
+  opacity: 1;
+  box-shadow: none;
+}
+
 .cell-content {
   display: flex;
   flex-direction: column;
@@ -354,5 +422,10 @@ onMounted(loadData)
 .empty-cell {
   color: #c0c4cc;
   font-size: 20px;
+}
+
+.unavailable-cell {
+  color: #c0c4cc;
+  font-size: 18px;
 }
 </style>
