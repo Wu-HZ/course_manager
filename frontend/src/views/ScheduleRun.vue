@@ -37,6 +37,18 @@
             请先处理上方必须项后再开始排课。
           </span>
         </el-form-item>
+        <el-form-item label="浏览器通知">
+          <div class="notification-setting">
+            <div class="notification-setting__text">{{ notificationStatusText }}</div>
+            <el-button
+              v-if="notificationSupported && notificationPermission !== 'granted'"
+              size="small"
+              @click="requestNotificationPermission"
+            >
+              {{ notificationPermission === 'denied' ? '已被拦截' : '开启通知' }}
+            </el-button>
+          </div>
+        </el-form-item>
       </el-form>
     </el-card>
 
@@ -162,7 +174,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import SchedulePrecheckPanel from '../components/SchedulePrecheckPanel.vue'
@@ -190,7 +202,10 @@ const precheckLoading = ref(false)
 const completionDialogVisible = ref(false)
 const completionDialogMode = ref('success')
 const lastSolveTimeMs = ref(0)
+const notificationPermission = ref('default')
 const router = useRouter()
+const notificationSupported = typeof window !== 'undefined' && 'Notification' in window
+let activeCompletionNotification = null
 
 const statusText = computed(() => getScheduleResultStatusText(result.value?.solve_status))
 const statusType = computed(() => getScheduleResultStatusType(result.value?.solve_status))
@@ -243,6 +258,85 @@ const completionDialogDescription = computed(() => {
   }
   return '本次求解已结束，但未生成可用课表。请查看当前页面的结果信息。'
 })
+const notificationStatusText = computed(() => {
+  if (!notificationSupported) {
+    return '当前浏览器不支持系统通知。'
+  }
+  if (notificationPermission.value === 'granted') {
+    return '已开启；排课结束且当前页面不在前台时，会发送浏览器通知。'
+  }
+  if (notificationPermission.value === 'denied') {
+    return '浏览器已阻止本站通知；如需启用，请在浏览器站点权限中重新允许。'
+  }
+  return '未开启；建议允许通知，这样离开当前页面时也能在排课结束后收到提醒。'
+})
+
+const syncNotificationPermission = () => {
+  notificationPermission.value = notificationSupported ? Notification.permission : 'unsupported'
+}
+
+const requestNotificationPermission = async ({ silent = false } = {}) => {
+  if (!notificationSupported) {
+    if (!silent) {
+      ElMessage.warning('当前浏览器不支持系统通知')
+    }
+    return 'unsupported'
+  }
+  if (notificationPermission.value === 'denied') {
+    if (!silent) {
+      ElMessage.warning('浏览器已阻止通知，请在站点权限中手动允许')
+    }
+    return 'denied'
+  }
+
+  const permission = await Notification.requestPermission()
+  notificationPermission.value = permission
+
+  if (!silent) {
+    if (permission === 'granted') {
+      ElMessage.success('浏览器通知已开启')
+    } else {
+      ElMessage.warning('浏览器通知未开启')
+    }
+  }
+  return permission
+}
+
+const notifyScheduleCompletion = async () => {
+  if (!notificationSupported || notificationPermission.value !== 'granted') {
+    return
+  }
+  if (document.visibilityState === 'visible' && document.hasFocus()) {
+    return
+  }
+
+  activeCompletionNotification?.close()
+
+  const notification = new Notification(completionDialogTitle.value, {
+    body: completionDialogMode.value === 'success'
+      ? `${statusText.value} · ${completionResultName.value} · 用时 ${completionSolveTimeText.value}`
+      : `${statusText.value} · 请返回排课页查看错误信息和诊断分析。`,
+    tag: 'schedule-run-completion',
+    renotify: true,
+    requireInteraction: true,
+  })
+
+  notification.onclick = async () => {
+    window.focus()
+    if (completionDialogMode.value === 'success') {
+      await router.push('/schedule-view')
+    } else {
+      await router.push('/schedule-run')
+    }
+    notification.close()
+  }
+  notification.onclose = () => {
+    if (activeCompletionNotification === notification) {
+      activeCompletionNotification = null
+    }
+  }
+  activeCompletionNotification = notification
+}
 
 const openCompletionDialog = (mode) => {
   completionDialogMode.value = mode
@@ -297,6 +391,10 @@ const runSchedule = async () => {
     return
   }
 
+  if (notificationSupported && notificationPermission.value === 'default') {
+    await requestNotificationPermission({ silent: true })
+  }
+
   running.value = true
   completionDialogVisible.value = false
   result.value = null
@@ -322,6 +420,7 @@ const runSchedule = async () => {
     }
     ElMessage.success('排课完成')
     openCompletionDialog(res.success === false ? 'failure' : 'success')
+    await notifyScheduleCompletion()
     pickerRef.value?.refresh()
   } catch (error) {
     if (error.response?.data) {
@@ -333,6 +432,7 @@ const runSchedule = async () => {
       lastSolveTimeMs.value = error.response.data.solve_time_ms || 0
       ElMessage.error('排课失败')
       openCompletionDialog('failure')
+      await notifyScheduleCompletion()
     } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       errors.value = ['请求超时，请稍后刷新页面查看历史记录。']
       ElMessage.error('请求超时，后台可能仍在计算')
@@ -347,7 +447,14 @@ const runSchedule = async () => {
   }
 }
 
-onMounted(loadPrecheck)
+onMounted(() => {
+  syncNotificationPermission()
+  loadPrecheck()
+})
+
+onBeforeUnmount(() => {
+  activeCompletionNotification?.close()
+})
 </script>
 
 <style scoped>
@@ -385,6 +492,19 @@ onMounted(loadPrecheck)
   margin-left: 12px;
   font-size: 12px;
   color: #f56c6c;
+}
+
+.notification-setting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.notification-setting__text {
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .errors {
