@@ -58,6 +58,7 @@ class ClassSubjectTeacherViewSet(viewsets.ModelViewSet):
 
 
 class TeacherQualificationViewSet(viewsets.ModelViewSet):
+    queryset = TeacherQualification.objects.select_related('teacher', 'subject').all()
     serializer_class = TeacherQualificationSerializer
 
     def get_queryset(self):
