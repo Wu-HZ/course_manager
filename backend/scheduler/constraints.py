@@ -225,12 +225,21 @@ def add_am_preference_objective(model, schedule_vars, subjects_dict, weight=10):
     return objectives
 
 
-def add_consecutive_preference_objective(model, schedule_vars, subjects_dict, weight=5):
+def add_consecutive_preference_objective(
+    model,
+    schedule_vars,
+    subjects_dict,
+    weight=5,
+    forbidden_pairs=None,
+):
     """
     S2: 连堂课连续软约束
     允许连堂的课程奖励相邻时间片（跳过禁止跨越的节次对）
     """
-    forbidden = set(CONSECUTIVE_FORBIDDEN_PAIRS)
+    if forbidden_pairs is None:
+        forbidden_pairs = CONSECUTIVE_FORBIDDEN_PAIRS
+
+    forbidden = set(forbidden_pairs)
     objectives = []
     for (class_id, subject_id), slots in schedule_vars.items():
         if not subjects_dict[subject_id].allow_consecutive:

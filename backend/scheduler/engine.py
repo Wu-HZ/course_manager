@@ -16,7 +16,8 @@ from .models import ScheduleResult, ScheduleEntry
 from .time_slots import (
     PERIODS_PER_DAY, get_all_slots, DAYS,
     is_friday_class_meeting,
-    FRIDAY_CLASS_MEETING, TOTAL_SLOTS
+    FRIDAY_CLASS_MEETING, TOTAL_SLOTS,
+    CONSECUTIVE_FORBIDDEN_PAIRS,
 )
 from .constraints import (
     add_weekly_hours_constraint,
@@ -59,6 +60,24 @@ class ScheduleEngine:
         self.class_meeting_name = self.settings.class_meeting_name
         self.combined_slots = self.settings.get_combined_class_slots_list()
         self.combined_slots_set = set(self.combined_slots)
+        self.h9_forbidden_pairs = self._parse_h9_forbidden_pairs()
+
+    def _parse_h9_forbidden_pairs(self):
+        """解析 H9 配置，返回禁止跨越的相邻节次对。"""
+        forbidden_pairs = []
+        try:
+            for pair_str in self.settings.h9_consecutive_forbidden.split(';'):
+                pair_str = pair_str.strip()
+                if not pair_str:
+                    continue
+                parts = pair_str.split(',')
+                if len(parts) != 2:
+                    continue
+                forbidden_pairs.append((int(parts[0].strip()), int(parts[1].strip())))
+        except (ValueError, AttributeError):
+            return CONSECUTIVE_FORBIDDEN_PAIRS
+
+        return forbidden_pairs or CONSECUTIVE_FORBIDDEN_PAIRS
 
     def load_data(self):
         """加载所有需要的数据"""
@@ -674,20 +693,9 @@ class ScheduleEngine:
 
         # H9: 连堂课禁止跨越指定节次对
         # 解析设置中的禁跨节次对（格式: "1,2;3,4" -> [(1,2), (3,4)]）
-        forbidden_pairs = []
-        try:
-            for pair_str in self.settings.h9_consecutive_forbidden.split(';'):
-                pair_str = pair_str.strip()
-                if not pair_str:
-                    continue
-                parts = pair_str.split(',')
-                if len(parts) == 2:
-                    forbidden_pairs.append((int(parts[0]), int(parts[1])))
-        except:
-            forbidden_pairs = [(1, 2), (3, 4)]  # 默认值
         add_consecutive_forbidden_constraint(
             self.model, self.schedule_vars, self.subjects,
-            forbidden_pairs=forbidden_pairs
+            forbidden_pairs=self.h9_forbidden_pairs
         )
 
         # H10: 教师周课时上限 (扣除已锁定的课时)
@@ -731,7 +739,8 @@ class ScheduleEngine:
         objectives.extend(
             add_consecutive_preference_objective(
                 self.model, self.schedule_vars, self.subjects,
-                weight=s.s2_consecutive_weight
+                weight=s.s2_consecutive_weight,
+                forbidden_pairs=self.h9_forbidden_pairs,
             )
         )
 

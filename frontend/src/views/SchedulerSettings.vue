@@ -130,8 +130,8 @@ const basicFields = [
     code: 'BASE-1',
     label: '班会课程名',
     type: 'text',
-    help: '用于识别应由班主任承担的班会课程。',
-    note: '例如：班会、班队会、主题班会。',
+    help: '用于识别哪门课程应视为班会课。',
+    note: '匹配到的课程会固定锁定在周五第 4 节，由班主任承担，并且不进入教师资质和授课分配。请与课程名称完全一致，例如：班会、班队会、主题班会。',
   },
   {
     key: 'combined_class_slots',
@@ -139,8 +139,8 @@ const basicFields = [
     label: '合班课时段',
     type: 'text',
     spanClass: 'field-card--span-2',
-    help: '定义校本课程或合班课允许使用的固定时段。',
-    note: '格式示例：1,4;1,5;3,4;3,5。星期从 0=周一开始，节次从 0 开始。',
+    help: '定义全校统一预留给校本课程/合班课的固定时段。',
+    note: '这些时间片会先锁给校本课程，普通课程不会排到这里；参与校本课程分组的教师在这些时段也会被占用。格式示例：1,4;1,5;3,4;3,5。星期从 0=周一开始，节次从 0 开始。',
   },
   {
     key: 'solver_num_workers',
@@ -149,8 +149,8 @@ const basicFields = [
     type: 'number',
     min: 1,
     max: 16,
-    help: '控制排课时并行计算使用的线程数量。',
-    note: '通常建议接近机器可用 CPU 核心数。',
+    help: '控制 OR-Tools 求解器并行搜索使用的线程数。',
+    note: '通常建议接近机器可用 CPU 核心数。它影响求解速度和资源占用，不直接改变约束或评分规则。',
   },
 ]
 
@@ -160,8 +160,8 @@ const hardConstraintFields = [
     code: 'H9',
     label: '连堂禁止跨节边界',
     type: 'text',
-    help: '限制连堂课不能跨过哪些节次边界。',
-    note: '格式示例：1,2;3,4，表示第 2-3 节和第 4-5 节之间禁止组成连堂。',
+    help: '只对“允许连堂”的课程生效，禁止它们跨过指定边界形成相邻两节连排。',
+    note: '例如 1,2 表示同一门允许连堂的课不能同时占用第 2、3 节形成连堂；例如 3,4 表示不能跨第 4、5 节。格式示例：1,2;3,4，索引从 0 开始。',
   },
   {
     key: 'h11_teacher_class_daily_max',
@@ -171,8 +171,8 @@ const hardConstraintFields = [
     min: 1,
     max: 6,
     unit: '节',
-    help: '同一教师同一天在同一班级最多可上几节课。',
-    note: '过小会增加排课难度，过大则可能让课表过于集中。',
+    help: '限制同一教师在同一天、同一班级的总排课节数。',
+    note: '这是按“教师 + 班级 + 日期”汇总计算的，不区分该教师在这个班教的是哪一门课。过小会增加排课难度，过大则可能让课表过于集中。',
   },
 ]
 
@@ -184,7 +184,7 @@ const preferenceRewardFields = [
     type: 'number',
     min: 0,
     max: 100,
-    help: '“上午优先”课程排在上午时获得的奖励分。',
+    help: '对标记为“上午优先”的课程，每排到上午 1 节就增加一份奖励分。',
   },
   {
     key: 's2_consecutive_weight',
@@ -193,7 +193,7 @@ const preferenceRewardFields = [
     type: 'number',
     min: 0,
     max: 100,
-    help: '允许连堂的课程连续排布时获得的奖励分。',
+    help: '对“允许连堂”的课程，每形成一组允许的相邻连排，就增加一份奖励分。',
   },
 ]
 
@@ -205,7 +205,7 @@ const preferencePenaltyFields = [
     type: 'number',
     min: 0,
     max: 100,
-    help: '同课同班同一天超过 1 节时施加的惩罚分。',
+    help: '同一班级的同一门课在同一天超过 1 节时，对超出的节数累计惩罚。',
   },
   {
     key: 's4_teacher_daily_threshold',
@@ -215,7 +215,7 @@ const preferencePenaltyFields = [
     min: 1,
     max: 6,
     unit: '节',
-    help: '教师单日课时超过该值后，才开始计算日负载惩罚。',
+    help: '教师某天总排课节数超过该值后，才开始计算日负载惩罚。',
   },
   {
     key: 's4_teacher_daily_weight',
@@ -224,7 +224,7 @@ const preferencePenaltyFields = [
     type: 'number',
     min: 0,
     max: 100,
-    help: '教师单日课时超出阈值部分对应的惩罚分。',
+    help: '教师某天总排课每超出阈值 1 节，就增加一份惩罚分。',
   },
   {
     key: 's5_avoid_first_weight',
@@ -233,7 +233,7 @@ const preferencePenaltyFields = [
     type: 'number',
     min: 0,
     max: 100,
-    help: '“避免第一节”课程排在第一节时施加的惩罚分。',
+    help: '对标记为“避免第一节”的课程，每排在当天第 1 节 1 次，就增加一份惩罚分。',
   },
   {
     key: 's6_subject_switch_weight',
@@ -242,7 +242,7 @@ const preferencePenaltyFields = [
     type: 'number',
     min: 0,
     max: 100,
-    help: '教师连续两节在不同班级上课时施加的惩罚分。',
+    help: '同一教师若上一节在 A 班、下一节在 B 班，就记一次惩罚分。',
   },
   {
     key: 's7_same_class_subject_switch_weight',
@@ -251,7 +251,7 @@ const preferencePenaltyFields = [
     type: 'number',
     min: 0,
     max: 100,
-    help: '教师连续两节在同一班级但教授不同科目时施加的惩罚分。',
+    help: '同一教师若连续两节在同一班级但教授不同科目，就记一次惩罚分；同科连堂不罚。',
   },
 ]
 
