@@ -15,6 +15,47 @@
       </el-space>
     </div>
 
+    <el-row v-if="precheck" :gutter="20" class="stats-row">
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>教师数量</template>
+          <div class="stat-number">{{ stats.teachers }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>班级数量</template>
+          <div class="stat-number">{{ stats.classes }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>课程数量</template>
+          <div class="stat-number">{{ stats.subjects }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>授课分配</template>
+          <div class="stat-number">{{ stats.assignments }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>校课时量</template>
+          <div class="stat-number">{{ stats.totalSchoolHours }}</div>
+          <div class="stat-caption">含校本课程、班会课</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="12" :lg="4">
+        <el-card class="stats-card" shadow="hover">
+          <template #header>人均课时</template>
+          <div class="stat-number">{{ averageTeacherHoursDisplay }}</div>
+          <div class="stat-caption">按全校总课时 / 教师数</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <el-row v-if="precheck" :gutter="20" class="guide-row">
       <el-col :xs="24" :lg="16">
         <PreparationFlowCard :precheck="precheck" />
@@ -55,47 +96,6 @@
               <el-button @click="router.push('/schedule-view')">查看课表</el-button>
             </div>
           </template>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="20" class="stats-row">
-      <el-col :xs="12" :lg="4">
-        <el-card class="stats-card" shadow="hover">
-          <template #header>教师数量</template>
-          <div class="stat-number">{{ stats.teachers }}</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :lg="4">
-        <el-card class="stats-card" shadow="hover">
-          <template #header>班级数量</template>
-          <div class="stat-number">{{ stats.classes }}</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :lg="4">
-        <el-card class="stats-card" shadow="hover">
-          <template #header>课程数量</template>
-          <div class="stat-number">{{ stats.subjects }}</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :lg="4">
-        <el-card class="stats-card" shadow="hover">
-          <template #header>授课分配</template>
-          <div class="stat-number">{{ stats.assignments }}</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :lg="4">
-        <el-card class="stats-card" shadow="hover">
-          <template #header>校课时量</template>
-          <div class="stat-number">{{ stats.totalSchoolHours }}</div>
-          <div class="stat-caption">含校本课程、班会课</div>
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :lg="4">
-        <el-card class="stats-card" shadow="hover">
-          <template #header>人均课时</template>
-          <div class="stat-number">{{ averageTeacherHoursDisplay }}</div>
-          <div class="stat-caption">按全校总课时 / 教师数</div>
         </el-card>
       </el-col>
     </el-row>
