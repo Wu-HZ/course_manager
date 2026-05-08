@@ -45,8 +45,8 @@ SHEET_CONFIG = {
     },
     '教师': {
         'model': Teacher,
-        'fields': ['name', 'travel_group__name', 'combined_class_group__name', 'exclude_from_combined', 'min_weekly_hours', 'max_weekly_hours'],
-        'headers': ['姓名', '送教分组名称', '校本课程分组名称', '不参与校本课程(TRUE/FALSE)', '周课时下限(留空不限)', '周课时上限(留空不限)'],
+        'fields': ['name', 'travel_group__name', 'combined_class_group__name', 'combined_class_day', 'exclude_from_combined', 'min_weekly_hours', 'max_weekly_hours'],
+        'headers': ['姓名', '送教分组名称', '校本课程分组名称', '校本课程日期(1=周二,3=周四，留空自动分配)', '不参与校本课程(TRUE/FALSE)', '周课时下限(留空不限)', '周课时上限(留空不限)'],
         'fk_fields': {
             'travel_group__name': ('travel_group', TravelGroup, 'name'),
             'combined_class_group__name': ('combined_class_group', CombinedClassGroup, 'name'),

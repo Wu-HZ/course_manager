@@ -1,11 +1,11 @@
 from io import BytesIO
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from rest_framework.test import APITestCase, APIRequestFactory
 
-from .data_io import SHEET_CONFIG, import_data
-from .models import ScheduleLock, SchoolClass, Subject, Teacher
+from .data_io import SHEET_CONFIG, export_data, import_data
+from .models import CombinedClassGroup, ScheduleLock, SchoolClass, Subject, Teacher
 
 
 class ImportDataTests(APITestCase):
@@ -56,6 +56,32 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][schedule_lock_sheet]['updated'], 0)
         self.assertEqual(response.data['error_count'], 1)
 
+    def test_import_teacher_combined_class_day(self):
+        teacher_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is Teacher
+        )
+        combined_group = CombinedClassGroup.objects.create(name='校本一组')
+
+        workbook_bytes = self.build_workbook({
+            teacher_sheet: [
+                ['李老师', None, combined_group.name, 3, 'FALSE', None, None],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        self.assertEqual(response.status_code, 200)
+        teacher = Teacher.objects.get(name='李老师')
+        self.assertEqual(teacher.combined_class_group, combined_group)
+        self.assertEqual(teacher.combined_class_day, 3)
+
     def test_import_rolls_back_all_rows_when_any_error_occurs(self):
         school_class = SchoolClass.objects.create(name='二1班', grade=2)
         subject = Subject.objects.create(name='数学')
@@ -86,3 +112,33 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][schedule_lock_sheet]['created'], 0)
         self.assertEqual(response.data['results'][schedule_lock_sheet]['updated'], 0)
         self.assertEqual(response.data['error_count'], 1)
+
+
+class ExportDataTests(APITestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def test_export_teacher_includes_combined_class_day(self):
+        combined_group = CombinedClassGroup.objects.create(name='校本二组')
+        Teacher.objects.create(
+            name='王老师',
+            combined_class_group=combined_group,
+            combined_class_day=1,
+        )
+        teacher_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is Teacher
+        )
+
+        request = self.factory.get('/api/data/export/')
+        response = export_data(request)
+
+        workbook = load_workbook(BytesIO(response.content))
+        ws = workbook[teacher_sheet]
+        headers = [cell.value for cell in ws[1]]
+        data_row = [cell.value for cell in ws[2]]
+
+        self.assertIn('校本课程日期(1=周二,3=周四，留空自动分配)', headers)
+        self.assertEqual(data_row[0], '王老师')
+        self.assertEqual(data_row[2], combined_group.name)
+        self.assertEqual(data_row[3], 1)
