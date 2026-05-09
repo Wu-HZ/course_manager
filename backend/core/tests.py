@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase, APIRequestFactory
 from .data_io import SHEET_CONFIG, export_data, import_data
 from .models import (
     ClassSubjectTeacher, CombinedClassGroup, ScheduleLock, SchedulerSettings,
-    SchoolClass, Subject, Teacher,
+    SchoolClass, Subject, Teacher, TeacherBlockedTime,
 )
 
 
@@ -178,6 +178,63 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][assignment_sheet]['updated'], 0)
         self.assertEqual(response.data['error_count'], 1)
         self.assertIn('信息技术 不适用于 四1班 所在年级。', response.data['errors'][0])
+
+    def test_import_rejects_invalid_teacher_combined_class_day(self):
+        teacher_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is Teacher
+        )
+
+        workbook_bytes = self.build_workbook({
+            teacher_sheet: [
+                ['赵老师', None, None, 2, 'FALSE', None, None],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['committed'])
+        self.assertEqual(Teacher.objects.filter(name='赵老师').count(), 0)
+        self.assertEqual(response.data['results'][teacher_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][teacher_sheet]['updated'], 0)
+        self.assertEqual(response.data['error_count'], 1)
+        self.assertIn('校本课程日期', response.data['errors'][0])
+
+    def test_import_rejects_invalid_blocked_time_period_type(self):
+        teacher = Teacher.objects.create(name='刘老师')
+        blocked_time_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is TeacherBlockedTime
+        )
+
+        workbook_bytes = self.build_workbook({
+            blocked_time_sheet: [
+                [teacher.name, 1, 'night'],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['committed'])
+        self.assertEqual(TeacherBlockedTime.objects.count(), 0)
+        self.assertEqual(response.data['results'][blocked_time_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][blocked_time_sheet]['updated'], 0)
+        self.assertEqual(response.data['error_count'], 1)
+        self.assertIn('时段', response.data['errors'][0])
 
 
 class ExportDataTests(APITestCase):

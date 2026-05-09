@@ -3,6 +3,7 @@
 Excel格式，每个数据类型一个Sheet
 """
 from io import BytesIO
+from django.core.exceptions import ValidationError
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from django.db import transaction
@@ -133,6 +134,67 @@ def build_import_response(results, errors, committed):
         status_code = 400
 
     return Response(payload, status=status_code)
+
+
+def get_import_lookup_kwargs(model, data, lookup_field=None, lookup_value=None):
+    """根据模型返回导入时用于查找已有记录的键。"""
+    if model == TeacherQualification:
+        return {
+            'teacher': data.get('teacher'),
+            'subject': data.get('subject'),
+        }
+    if model == ClassSubjectTeacher:
+        return {
+            'school_class': data.get('school_class'),
+            'subject': data.get('subject'),
+        }
+    if model == ScheduleLock:
+        return {
+            'school_class': data.get('school_class'),
+            'day': data.get('day'),
+            'period': data.get('period'),
+        }
+    if model == TeacherBlockedTime:
+        return {
+            'teacher': data.get('teacher'),
+            'day': data.get('day'),
+            'period_type': data.get('period_type'),
+        }
+    return {lookup_field: lookup_value}
+
+
+def get_existing_import_instance(model, lookup_kwargs):
+    """获取将被本次导入更新的已有记录。"""
+    try:
+        return model.objects.get(**lookup_kwargs)
+    except model.DoesNotExist:
+        return None
+
+
+def format_model_validation_error(model, error):
+    """把 Django ValidationError 格式化成更适合导入结果展示的文本。"""
+    if hasattr(error, 'message_dict'):
+        messages = []
+        for field_name, field_errors in error.message_dict.items():
+            if field_name == '__all__':
+                messages.extend(str(message) for message in field_errors)
+                continue
+            try:
+                label = model._meta.get_field(field_name).verbose_name
+            except Exception:
+                label = field_name
+            messages.extend(f'{label}: {message}' for message in field_errors)
+        return '；'.join(messages)
+
+    return '；'.join(str(message) for message in error.messages)
+
+
+def validate_import_instance(model, data, lookup_kwargs):
+    """在真正写库前执行模型层校验。"""
+    instance = get_existing_import_instance(model, lookup_kwargs) or model()
+    for key, value in data.items():
+        setattr(instance, key, value)
+    instance.full_clean()
 
 
 @api_view(['GET'])
@@ -281,9 +343,23 @@ def import_data(request):
                     if not data or not lookup_field:
                         continue
 
+                    lookup_kwargs = get_import_lookup_kwargs(
+                        model,
+                        data,
+                        lookup_field=lookup_field,
+                        lookup_value=lookup_value,
+                    )
+
                     # 根据名称查找或创建
                     if model == TeacherQualification:
                         if not is_subject_qualification_managed(data.get('subject')):
+                            continue
+                        try:
+                            validate_import_instance(model, data, lookup_kwargs)
+                        except ValidationError as e:
+                            errors.append(
+                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
+                            )
                             continue
                         # 资质表用组合键查找
                         obj, is_created = model.objects.get_or_create(
@@ -299,6 +375,13 @@ def import_data(request):
                         if validation_error:
                             errors.append(f'{sheet_name} 第{row_idx}行: {validation_error}')
                             continue
+                        try:
+                            validate_import_instance(model, data, lookup_kwargs)
+                        except ValidationError as e:
+                            errors.append(
+                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
+                            )
+                            continue
                         # 授课分配用组合键查找
                         obj, is_created = model.objects.get_or_create(
                             school_class=data.get('school_class'),
@@ -310,6 +393,13 @@ def import_data(request):
                                 setattr(obj, k, v)
                             obj.save()
                     elif model == ScheduleLock:
+                        try:
+                            validate_import_instance(model, data, lookup_kwargs)
+                        except ValidationError as e:
+                            errors.append(
+                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
+                            )
+                            continue
                         # 课表锁定用组合键查找
                         obj, is_created = model.objects.update_or_create(
                             school_class=data.get('school_class'),
@@ -318,6 +408,13 @@ def import_data(request):
                             defaults=data
                         )
                     elif model == TeacherBlockedTime:
+                        try:
+                            validate_import_instance(model, data, lookup_kwargs)
+                        except ValidationError as e:
+                            errors.append(
+                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
+                            )
+                            continue
                         # 教师禁排日用组合键查找
                         obj, is_created = model.objects.update_or_create(
                             teacher=data.get('teacher'),
@@ -326,6 +423,13 @@ def import_data(request):
                             defaults=data
                         )
                     else:
+                        try:
+                            validate_import_instance(model, data, lookup_kwargs)
+                        except ValidationError as e:
+                            errors.append(
+                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
+                            )
+                            continue
                         # 其他表用name字段查找
                         obj, is_created = model.objects.update_or_create(
                             **{lookup_field: lookup_value},
