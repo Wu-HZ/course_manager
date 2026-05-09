@@ -309,8 +309,8 @@ class SchedulerSettings(models.Model):
 
     # 硬约束参数
     h9_consecutive_forbidden = models.CharField(
-        '连堂禁跨节次对', max_length=50, default='1,2;3,4',
-        help_text='禁止连堂跨越的节次对，格式如"1,2;3,4"表示第2-3节和第4-5节之间不能连堂（0起始）'
+        '教师禁连续上课节次对', max_length=50, default='1,2;3,4',
+        help_text='禁止教师连续上课跨越的节次对，格式如"1,2;3,4"表示第2-3节和第4-5节之间不能连续上课（0起始）'
     )
     h11_teacher_class_daily_max = models.IntegerField(
         '教师同班单日上限', default=2,

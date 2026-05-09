@@ -691,10 +691,10 @@ class ScheduleEngine:
             self.model, self.schedule_vars, self.subjects
         )
 
-        # H9: 连堂课禁止跨越指定节次对
+        # H9: 教师禁止跨越指定节次对连续上课
         # 解析设置中的禁跨节次对（格式: "1,2;3,4" -> [(1,2), (3,4)]）
         add_consecutive_forbidden_constraint(
-            self.model, self.schedule_vars, self.subjects,
+            self.model, self.schedule_vars, self.teacher_assignments,
             forbidden_pairs=self.h9_forbidden_pairs
         )
 

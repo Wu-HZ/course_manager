@@ -123,22 +123,34 @@ def add_max_daily_limit_constraint(model, schedule_vars, subjects_dict):
                 model.Add(sum(day_slots) <= max_daily)
 
 
-def add_consecutive_forbidden_constraint(model, schedule_vars, subjects_dict, forbidden_pairs=None):
+def add_consecutive_forbidden_constraint(model, schedule_vars, teacher_assignments, forbidden_pairs=None):
     """
-    H9: 连堂课禁止跨越指定节次对
-    第2节和第3节之间有课间操，连堂课不能横跨这两节
+    H9: 教师禁止跨越指定节次对连续上课
+    同一教师在指定边界两侧不能连续排课，不区分是否允许连堂，也不区分是否同班
     forbidden_pairs: 禁止跨越的节次对列表，如 [(1,2)]，默认使用 CONSECUTIVE_FORBIDDEN_PAIRS
     """
     if forbidden_pairs is None:
         forbidden_pairs = CONSECUTIVE_FORBIDDEN_PAIRS
-    for (class_id, subject_id), slots in schedule_vars.items():
-        if not subjects_dict[subject_id].allow_consecutive:
-            continue
+
+    for teacher_id, assignments in teacher_assignments.items():
         for day in range(5):
             for p1, p2 in forbidden_pairs:
-                if (day, p1) in slots and (day, p2) in slots:
-                    # 禁止两节同时被选中
-                    model.Add(slots[(day, p1)] + slots[(day, p2)] <= 1)
+                slot1_vars = []
+                slot2_vars = []
+
+                for class_id, subject_id in assignments:
+                    key = (class_id, subject_id)
+                    slots = schedule_vars.get(key)
+                    if not slots:
+                        continue
+                    if (day, p1) in slots:
+                        slot1_vars.append(slots[(day, p1)])
+                    if (day, p2) in slots:
+                        slot2_vars.append(slots[(day, p2)])
+
+                if slot1_vars and slot2_vars:
+                    # 结合 H3 教师互斥约束，禁止教师跨指定边界连续上课
+                    model.Add(sum(slot1_vars) + sum(slot2_vars) <= 1)
 
 
 def add_teacher_max_hours_constraint(model, schedule_vars, teacher_assignments, teachers_dict, teacher_lock_counts=None):

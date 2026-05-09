@@ -14,7 +14,7 @@
     </div>
 
     <div class="summary-strip">
-      <div class="summary-strip__text">重点关注班会课程名、合班课时段、连堂边界和软约束权重。</div>
+      <div class="summary-strip__text">重点关注班会课程名、合班课时段、教师连续上课边界和软约束权重。</div>
       <div class="summary-strip__stats">
         <span v-for="item in overviewStats" :key="item.label" class="summary-chip">
           <strong>{{ item.value }}</strong>
@@ -158,10 +158,10 @@ const hardConstraintFields = [
   {
     key: 'h9_consecutive_forbidden',
     code: 'H9',
-    label: '连堂禁止跨节边界',
+    label: '教师禁止跨边界连续上课',
     type: 'text',
-    help: '只对“允许连堂”的课程生效，禁止它们跨过指定边界形成相邻两节连排。',
-    note: '例如 1,2 表示同一门允许连堂的课不能同时占用第 2、3 节形成连堂；例如 3,4 表示不能跨第 4、5 节。格式示例：1,2;3,4，索引从 0 开始。',
+    help: '对同一教师生效，禁止他在指定边界两侧连续上课，不区分是否连堂，也不区分是否同一个班级。',
+    note: '例如 1,2 表示同一教师不能同时占用第 2、3 节；例如 3,4 表示不能跨第 4、5 节连续上课。格式示例：1,2;3,4，索引从 0 开始。',
   },
   {
     key: 'h11_teacher_class_daily_max',
