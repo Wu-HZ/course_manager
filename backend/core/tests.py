@@ -1,13 +1,17 @@
+import importlib
 from io import BytesIO
+from types import SimpleNamespace
 
+from django.apps import apps as django_apps
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from openpyxl import Workbook, load_workbook
 from rest_framework.test import APITestCase, APIRequestFactory
 
 from .data_io import IMPORT_KEY_HEADER, SHEET_CONFIG, export_data, import_data
 from .models import (
     ClassSubjectTeacher, CombinedClassGroup, ScheduleLock, SchedulerSettings,
-    SchoolClass, Subject, Teacher, TeacherBlockedTime,
+    SchoolClass, Subject, Teacher, TeacherBlockedTime, TeacherQualification,
 )
 
 
@@ -411,6 +415,47 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][settings_sheet]['created'], 0)
         self.assertEqual(response.data['results'][settings_sheet]['updated'], 1)
 
+    def test_import_applies_scheduler_settings_before_teacher_qualification_filtering(self):
+        settings_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is SchedulerSettings
+        )
+        subject_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is Subject
+        )
+        teacher_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is Teacher
+        )
+        qualification_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is TeacherQualification
+        )
+
+        workbook_bytes = self.build_workbook({
+            subject_sheet: [['主题班会']],
+            settings_sheet: [['主题班会']],
+            teacher_sheet: [['李老师']],
+            qualification_sheet: [['李老师', '主题班会']],
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        settings = SchedulerSettings.get_settings()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['committed'])
+        self.assertEqual(settings.class_meeting_name, '主题班会')
+        self.assertEqual(TeacherQualification.objects.count(), 0)
+        self.assertEqual(response.data['results'][qualification_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][qualification_sheet]['updated'], 0)
+
     def test_import_rejects_multiple_scheduler_settings_rows(self):
         settings_sheet = next(
             name for name, config in SHEET_CONFIG.items()
@@ -441,6 +486,58 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][settings_sheet]['updated'], 0)
         self.assertEqual(response.data['error_count'], 1)
         self.assertIn('只能包含一行参数设置', response.data['errors'][0])
+
+
+class SchedulerSettingsSchemaMigrationTests(APITestCase):
+    def test_normalize_scheduler_settings_schema_removes_legacy_required_columns(self):
+        if connection.vendor != 'sqlite':
+            self.skipTest('Only applicable to SQLite databases')
+
+        migration_module = importlib.import_module(
+            'core.migrations.0024_normalize_scheduler_settings_schema'
+        )
+
+        SchedulerSettings.objects.all().delete()
+
+        column_definitions = ', '.join(
+            f'"{column_name}" {column_sql}'
+            for column_name, column_sql in migration_module.CURRENT_SCHEDULER_SETTINGS_COLUMNS
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute('DROP TABLE IF EXISTS "core_schedulersettings_broken"')
+            cursor.execute(
+                'CREATE TABLE "core_schedulersettings_broken" ('
+                f'{column_definitions}, '
+                '"f2_enable_homeroom_main_subject" bool NOT NULL)'
+            )
+            cursor.execute('DROP TABLE "core_schedulersettings"')
+            cursor.execute(
+                'ALTER TABLE "core_schedulersettings_broken" '
+                'RENAME TO "core_schedulersettings"'
+            )
+            before_columns = {
+                row[1]
+                for row in cursor.execute(
+                    'PRAGMA table_info("core_schedulersettings")'
+                ).fetchall()
+            }
+
+        self.assertIn('f2_enable_homeroom_main_subject', before_columns)
+
+        schema_editor = SimpleNamespace(connection=connection)
+        migration_module.normalize_scheduler_settings_schema(django_apps, schema_editor)
+
+        with connection.cursor() as cursor:
+            after_columns = {
+                row[1]
+                for row in cursor.execute(
+                    'PRAGMA table_info("core_schedulersettings")'
+                ).fetchall()
+            }
+
+        self.assertNotIn('f2_enable_homeroom_main_subject', after_columns)
+        self.assertEqual(SchedulerSettings.get_settings().pk, 1)
 
 
 class ExportDataTests(APITestCase):

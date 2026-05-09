@@ -196,6 +196,7 @@ SHEET_CONFIG = {
 }
 
 EXPORT_ORDER = ['送教分组', '校本课程分组', '场地', '课程', '教师', '教师禁排日', '班级', '教师资质', '授课分配', '课表锁定', '排课参数']
+IMPORT_ORDER = ['送教分组', '校本课程分组', '场地', '课程', '排课参数', '教师', '教师禁排日', '班级', '教师资质', '授课分配', '课表锁定']
 
 
 def style_header(ws):
@@ -500,7 +501,7 @@ def import_data(request):
     errors = []
 
     with transaction.atomic():
-        for sheet_name in EXPORT_ORDER:
+        for sheet_name in IMPORT_ORDER:
             if sheet_name not in wb.sheetnames:
                 continue
 
