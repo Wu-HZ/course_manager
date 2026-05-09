@@ -3,7 +3,8 @@ from .models import (
     TravelGroup, Subject, CombinedClassGroup, Teacher,
     SchoolClass, Location, ClassSubjectTeacher,
     TeacherQualification, ScheduleLock, SchedulerSettings,
-    TeacherBlockedTime, is_subject_qualification_managed
+    TeacherBlockedTime, get_assignment_subject_validation_error,
+    is_subject_qualification_managed
 )
 
 
@@ -88,15 +89,11 @@ class ClassSubjectTeacherSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         school_class = attrs.get('school_class') or getattr(self.instance, 'school_class', None)
         subject = attrs.get('subject') or getattr(self.instance, 'subject', None)
+        validation_error = get_assignment_subject_validation_error(school_class, subject)
 
-        if subject and not is_subject_qualification_managed(subject):
+        if validation_error:
             raise serializers.ValidationError({
-                'subject': '班会和校本课程不在授课分配中设置。'
-            })
-
-        if school_class and subject and not subject.is_applicable_for_grade(school_class.grade):
-            raise serializers.ValidationError({
-                'subject': f'{subject.name} 不适用于 {school_class.name} 所在年级。'
+                'subject': validation_error
             })
 
         return attrs

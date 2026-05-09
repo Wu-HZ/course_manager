@@ -371,3 +371,17 @@ def is_subject_qualification_managed(subject):
         return False
     settings = SchedulerSettings.get_settings()
     return (not subject.is_combined_class) and subject.name != settings.class_meeting_name
+
+
+def get_assignment_subject_validation_error(school_class, subject):
+    """返回授课分配中课程不可用的原因；可用时返回 None。"""
+    if subject is None:
+        return None
+
+    if not is_subject_qualification_managed(subject):
+        return '班会和校本课程不在授课分配中设置。'
+
+    if school_class is not None and not subject.is_applicable_for_grade(school_class.grade):
+        return f'{subject.name} 不适用于 {school_class.name} 所在年级。'
+
+    return None

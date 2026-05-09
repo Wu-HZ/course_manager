@@ -12,8 +12,8 @@ from rest_framework.response import Response
 from .models import (
     TravelGroup, Subject, CombinedClassGroup, Teacher,
     SchoolClass, Location, ClassSubjectTeacher, TeacherQualification,
-    ScheduleLock, TeacherBlockedTime, get_qualification_subject_queryset,
-    is_subject_qualification_managed
+    ScheduleLock, TeacherBlockedTime, get_assignment_subject_validation_error,
+    get_qualification_subject_queryset, is_subject_qualification_managed
 )
 
 
@@ -292,6 +292,13 @@ def import_data(request):
                             defaults=data
                         )
                     elif model == ClassSubjectTeacher:
+                        validation_error = get_assignment_subject_validation_error(
+                            data.get('school_class'),
+                            data.get('subject'),
+                        )
+                        if validation_error:
+                            errors.append(f'{sheet_name} 第{row_idx}行: {validation_error}')
+                            continue
                         # 授课分配用组合键查找
                         obj, is_created = model.objects.get_or_create(
                             school_class=data.get('school_class'),

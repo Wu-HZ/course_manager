@@ -5,7 +5,10 @@ from openpyxl import Workbook, load_workbook
 from rest_framework.test import APITestCase, APIRequestFactory
 
 from .data_io import SHEET_CONFIG, export_data, import_data
-from .models import CombinedClassGroup, ScheduleLock, SchoolClass, Subject, Teacher
+from .models import (
+    ClassSubjectTeacher, CombinedClassGroup, ScheduleLock, SchedulerSettings,
+    SchoolClass, Subject, Teacher,
+)
 
 
 class ImportDataTests(APITestCase):
@@ -112,6 +115,69 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][schedule_lock_sheet]['created'], 0)
         self.assertEqual(response.data['results'][schedule_lock_sheet]['updated'], 0)
         self.assertEqual(response.data['error_count'], 1)
+
+    def test_import_rejects_assignment_for_class_meeting_subject(self):
+        school_class = SchoolClass.objects.create(name='三1班', grade=3)
+        teacher = Teacher.objects.create(name='班主任老师')
+        class_meeting_name = SchedulerSettings.get_settings().class_meeting_name
+        subject = Subject.objects.create(name=class_meeting_name)
+        assignment_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is ClassSubjectTeacher
+        )
+
+        workbook_bytes = self.build_workbook({
+            assignment_sheet: [
+                [school_class.name, subject.name, teacher.name, 'TRUE'],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['committed'])
+        self.assertEqual(ClassSubjectTeacher.objects.count(), 0)
+        self.assertEqual(response.data['results'][assignment_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][assignment_sheet]['updated'], 0)
+        self.assertEqual(response.data['error_count'], 1)
+        self.assertIn('班会和校本课程不在授课分配中设置。', response.data['errors'][0])
+
+    def test_import_rejects_assignment_for_inapplicable_grade_subject(self):
+        school_class = SchoolClass.objects.create(name='四1班', grade=4)
+        teacher = Teacher.objects.create(name='信息老师')
+        subject = Subject.objects.create(name='信息技术', applicable_grades='1,2')
+        assignment_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is ClassSubjectTeacher
+        )
+
+        workbook_bytes = self.build_workbook({
+            assignment_sheet: [
+                [school_class.name, subject.name, teacher.name, 'TRUE'],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['committed'])
+        self.assertEqual(ClassSubjectTeacher.objects.count(), 0)
+        self.assertEqual(response.data['results'][assignment_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][assignment_sheet]['updated'], 0)
+        self.assertEqual(response.data['error_count'], 1)
+        self.assertIn('信息技术 不适用于 四1班 所在年级。', response.data['errors'][0])
 
 
 class ExportDataTests(APITestCase):
