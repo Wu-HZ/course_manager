@@ -4,7 +4,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from openpyxl import Workbook, load_workbook
 from rest_framework.test import APITestCase, APIRequestFactory
 
-from .data_io import SHEET_CONFIG, export_data, import_data
+from .data_io import IMPORT_KEY_HEADER, SHEET_CONFIG, export_data, import_data
 from .models import (
     ClassSubjectTeacher, CombinedClassGroup, ScheduleLock, SchedulerSettings,
     SchoolClass, Subject, Teacher, TeacherBlockedTime,
@@ -264,10 +264,10 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][blocked_time_sheet]['created'], 0)
         self.assertEqual(response.data['results'][blocked_time_sheet]['updated'], 0)
         self.assertEqual(response.data['error_count'], 1)
-        self.assertIn('系统中的教师存在重名', response.data['errors'][0])
+        self.assertIn('教师“王老师”存在多条记录', response.data['errors'][0])
         self.assertIn('王老师', response.data['errors'][0])
 
-    def test_import_rejects_when_workbook_contains_duplicate_teacher_names(self):
+    def test_import_allows_duplicate_teacher_names_when_import_keys_are_present(self):
         teacher_sheet = next(
             name for name, config in SHEET_CONFIG.items()
             if config['model'] is Teacher
@@ -275,8 +275,8 @@ class ImportDataTests(APITestCase):
 
         workbook_bytes = self.build_workbook({
             teacher_sheet: [
-                ['周老师', None, None, None, 'FALSE', None, None],
-                ['周老师', None, None, None, 'FALSE', None, None],
+                ['周老师', None, None, None, 'FALSE', None, None, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
+                ['周老师', None, None, None, 'FALSE', None, None, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'],
             ]
         })
         upload = SimpleUploadedFile(
@@ -288,14 +288,84 @@ class ImportDataTests(APITestCase):
         request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
         response = import_data(request)
 
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(response.data['committed'])
-        self.assertEqual(Teacher.objects.filter(name='周老师').count(), 0)
-        self.assertEqual(response.data['results'][teacher_sheet]['created'], 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['committed'])
+        self.assertEqual(Teacher.objects.filter(name='周老师').count(), 2)
+        self.assertEqual(
+            set(Teacher.objects.filter(name='周老师').values_list('import_key', flat=True)),
+            {
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            }
+        )
+        self.assertEqual(response.data['results'][teacher_sheet]['created'], 2)
         self.assertEqual(response.data['results'][teacher_sheet]['updated'], 0)
-        self.assertEqual(response.data['error_count'], 1)
-        self.assertIn(f'导入文件的“{teacher_sheet}”工作表存在重名', response.data['errors'][0])
-        self.assertIn('周老师', response.data['errors'][0])
+
+    def test_import_resolves_duplicate_teacher_names_by_import_key(self):
+        teacher_a = Teacher.objects.create(
+            name='赵老师',
+            import_key='11111111111111111111111111111111',
+        )
+        Teacher.objects.create(
+            name='赵老师',
+            import_key='22222222222222222222222222222222',
+        )
+        blocked_time_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is TeacherBlockedTime
+        )
+
+        workbook_bytes = self.build_workbook({
+            blocked_time_sheet: [
+                ['赵老师', 1, 'am', teacher_a.import_key],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['committed'])
+        blocked_time = TeacherBlockedTime.objects.get()
+        self.assertEqual(blocked_time.teacher_id, teacher_a.id)
+        self.assertEqual(response.data['results'][blocked_time_sheet]['created'], 1)
+        self.assertEqual(response.data['results'][blocked_time_sheet]['updated'], 0)
+
+    def test_import_updates_existing_teacher_by_import_key(self):
+        teacher = Teacher.objects.create(
+            name='原教师',
+            import_key='33333333333333333333333333333333',
+        )
+        teacher_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is Teacher
+        )
+
+        workbook_bytes = self.build_workbook({
+            teacher_sheet: [
+                ['新教师名', None, None, None, 'FALSE', None, None, teacher.import_key],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        teacher.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['committed'])
+        self.assertEqual(teacher.name, '新教师名')
+        self.assertEqual(response.data['results'][teacher_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][teacher_sheet]['updated'], 1)
 
 
 class ExportDataTests(APITestCase):
@@ -303,11 +373,15 @@ class ExportDataTests(APITestCase):
         self.factory = APIRequestFactory()
 
     def test_export_teacher_includes_combined_class_day(self):
-        combined_group = CombinedClassGroup.objects.create(name='校本二组')
-        Teacher.objects.create(
+        combined_group = CombinedClassGroup.objects.create(
+            name='校本二组',
+            import_key='cccccccccccccccccccccccccccccccc',
+        )
+        teacher = Teacher.objects.create(
             name='王老师',
             combined_class_group=combined_group,
             combined_class_day=1,
+            import_key='dddddddddddddddddddddddddddddddd',
         )
         teacher_sheet = next(
             name for name, config in SHEET_CONFIG.items()
@@ -323,19 +397,36 @@ class ExportDataTests(APITestCase):
         data_row = [cell.value for cell in ws[2]]
 
         self.assertIn('校本课程日期(1=周二,3=周四，留空自动分配)', headers)
+        self.assertIn(IMPORT_KEY_HEADER, headers)
+        self.assertIn('校本课程分组导入键', headers)
         self.assertEqual(data_row[0], '王老师')
         self.assertEqual(data_row[2], combined_group.name)
         self.assertEqual(data_row[3], 1)
+        self.assertEqual(data_row[7], teacher.import_key)
+        self.assertEqual(data_row[9], combined_group.import_key)
 
-    def test_export_rejects_when_existing_name_duplicates_make_file_ambiguous(self):
-        Teacher.objects.create(name='李老师')
-        Teacher.objects.create(name='李老师')
+    def test_export_allows_duplicate_teacher_names_and_includes_distinct_import_keys(self):
+        Teacher.objects.create(
+            name='李老师',
+            import_key='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        )
+        Teacher.objects.create(
+            name='李老师',
+            import_key='ffffffffffffffffffffffffffffffff',
+        )
+        teacher_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is Teacher
+        )
 
         request = self.factory.get('/api/data/export/')
         response = export_data(request)
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data['error_count'], 1)
-        self.assertIn('导出失败', response.data['error'])
-        self.assertIn('系统中的教师存在重名', response.data['errors'][0])
-        self.assertIn('李老师', response.data['errors'][0])
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(BytesIO(response.content))
+        ws = workbook[teacher_sheet]
+        exported_keys = {ws.cell(row=2, column=8).value, ws.cell(row=3, column=8).value}
+        self.assertEqual(
+            exported_keys,
+            {'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ffffffffffffffffffffffffffffffff'}
+        )

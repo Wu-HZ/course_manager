@@ -1,3 +1,6 @@
+import uuid
+
+from django.core.validators import RegexValidator
 from django.db import models
 
 
@@ -16,8 +19,33 @@ LOCATION_TYPES = [
     ('HOME_EC', '家政室'),
 ]
 
+IMPORT_KEY_VALIDATOR = RegexValidator(
+    regex=r'^[0-9a-f]{32}$',
+    message='导入键格式无效。'
+)
 
-class TravelGroup(models.Model):
+
+def generate_import_key():
+    return uuid.uuid4().hex
+
+
+class ImportKeyModel(models.Model):
+    import_key = models.CharField(
+        '导入键',
+        max_length=32,
+        unique=True,
+        default=generate_import_key,
+        editable=False,
+        db_index=True,
+        validators=[IMPORT_KEY_VALIDATOR],
+        help_text='系统生成的稳定导入键，用于导入导出时精确关联。'
+    )
+
+    class Meta:
+        abstract = True
+
+
+class TravelGroup(ImportKeyModel):
     """送教分组 - 关联一个禁排日"""
     name = models.CharField('分组名称', max_length=50)
     day_off = models.IntegerField('禁排日', choices=DAY_CHOICES)
@@ -55,7 +83,7 @@ class TeacherBlockedTime(models.Model):
         return f"{self.teacher.name} {self.get_day_display()} {self.get_period_type_display()}"
 
 
-class Subject(models.Model):
+class Subject(ImportKeyModel):
     """课程"""
     name = models.CharField('课程名称', max_length=50)
     weekly_hours = models.IntegerField('周课时数', default=1)
@@ -102,7 +130,7 @@ class Subject(models.Model):
         return not grades or grade in grades
 
 
-class CombinedClassGroup(models.Model):
+class CombinedClassGroup(ImportKeyModel):
     """校本课程分组 - 4个教师小组"""
     name = models.CharField('分组名称', max_length=50)
 
@@ -114,7 +142,7 @@ class CombinedClassGroup(models.Model):
         return self.name
 
 
-class Teacher(models.Model):
+class Teacher(ImportKeyModel):
     """教师"""
     COMBINED_DAY_CHOICES = [
         (1, '周二'),
@@ -157,7 +185,7 @@ class Teacher(models.Model):
         return self.name
 
 
-class SchoolClass(models.Model):
+class SchoolClass(ImportKeyModel):
     """班级"""
     name = models.CharField('班级名称', max_length=50)
     grade = models.IntegerField('年级', default=1)
@@ -176,7 +204,7 @@ class SchoolClass(models.Model):
         return self.name
 
 
-class Location(models.Model):
+class Location(ImportKeyModel):
     """场地"""
     name = models.CharField('场地名称', max_length=50)
     location_type = models.CharField(

@@ -1,108 +1,166 @@
 """
 数据导入导出功能
-Excel格式，每个数据类型一个Sheet
+Excel 格式，每个数据类型一个 Sheet
 """
-from collections import Counter
 from io import BytesIO
+
 from django.core.exceptions import ValidationError
-from django.db.models import Count
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
 from django.db import transaction
 from django.http import HttpResponse
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+
 from .models import (
-    TravelGroup, Subject, CombinedClassGroup, Teacher,
-    SchoolClass, Location, ClassSubjectTeacher, TeacherQualification,
-    ScheduleLock, TeacherBlockedTime, get_assignment_subject_validation_error,
-    get_qualification_subject_queryset, is_subject_qualification_managed
+    ClassSubjectTeacher,
+    CombinedClassGroup,
+    Location,
+    ScheduleLock,
+    SchoolClass,
+    Subject,
+    Teacher,
+    TeacherBlockedTime,
+    TeacherQualification,
+    TravelGroup,
+    get_assignment_subject_validation_error,
+    get_qualification_subject_queryset,
+    is_subject_qualification_managed,
 )
 
+IMPORT_KEY_HEADER = '导入键(系统生成，请勿修改)'
+BASE_MODELS = {
+    TravelGroup,
+    Subject,
+    CombinedClassGroup,
+    Teacher,
+    SchoolClass,
+    Location,
+}
 
-# Sheet配置：名称 -> (模型, 字段列表, 表头)
+
 SHEET_CONFIG = {
     '送教分组': {
         'model': TravelGroup,
-        'fields': ['name', 'day_off'],
-        'headers': ['分组名称', '禁排日(0周一~4周五)'],
+        'fields': ['name', 'day_off', 'import_key'],
+        'headers': ['分组名称', '禁排日(0周一~4周五)', IMPORT_KEY_HEADER],
     },
     '校本课程分组': {
         'model': CombinedClassGroup,
-        'fields': ['name'],
-        'headers': ['分组名称'],
+        'fields': ['name', 'import_key'],
+        'headers': ['分组名称', IMPORT_KEY_HEADER],
     },
     '场地': {
         'model': Location,
-        'fields': ['name', 'location_type', 'capacity'],
-        'headers': ['场地名称', '类型(CLASSROOM/PLAYGROUND/LAB/HOME_EC)', '容量'],
+        'fields': ['name', 'location_type', 'capacity', 'import_key'],
+        'headers': ['场地名称', '类型(CLASSROOM/PLAYGROUND/LAB/HOME_EC)', '容量', IMPORT_KEY_HEADER],
     },
     '课程': {
         'model': Subject,
-        'fields': ['name', 'weekly_hours', 'is_main_subject', 'max_teacher_classes', 'is_am_preferred', 'allow_consecutive',
-                   'max_daily_limit', 'location_type', 'is_combined_class',
-                   'applicable_grades', 'avoid_first_period'],
-        'headers': ['课程名称', '周课时', '主课(TRUE/FALSE)', '单师班数(1-5)', '优先上午(TRUE/FALSE)', '允许连堂(TRUE/FALSE)',
-                    '单日上限', '场地类型', '是否合班课(TRUE/FALSE)',
-                    '适用年级(如1,2,3)', '避免第一节(TRUE/FALSE)'],
+        'fields': [
+            'name', 'weekly_hours', 'is_main_subject', 'max_teacher_classes',
+            'is_am_preferred', 'allow_consecutive', 'max_daily_limit',
+            'location_type', 'is_combined_class', 'applicable_grades',
+            'avoid_first_period', 'import_key',
+        ],
+        'headers': [
+            '课程名称', '周课时', '主课(TRUE/FALSE)', '单师班数(1-5)',
+            '优先上午(TRUE/FALSE)', '允许连堂(TRUE/FALSE)', '单日上限',
+            '场地类型', '是否合班课(TRUE/FALSE)', '适用年级(如 1,2,3)',
+            '避免第一节(TRUE/FALSE)', IMPORT_KEY_HEADER,
+        ],
     },
     '教师': {
         'model': Teacher,
-        'fields': ['name', 'travel_group__name', 'combined_class_group__name', 'combined_class_day', 'exclude_from_combined', 'min_weekly_hours', 'max_weekly_hours'],
-        'headers': ['姓名', '送教分组名称', '校本课程分组名称', '校本课程日期(1=周二,3=周四，留空自动分配)', '不参与校本课程(TRUE/FALSE)', '周课时下限(留空不限)', '周课时上限(留空不限)'],
+        'fields': [
+            'name', 'travel_group__name', 'combined_class_group__name',
+            'combined_class_day', 'exclude_from_combined',
+            'min_weekly_hours', 'max_weekly_hours', 'import_key',
+            'travel_group__import_key', 'combined_class_group__import_key',
+        ],
+        'headers': [
+            '姓名', '送教分组名称', '校本课程分组名称',
+            '校本课程日期(1=周二,3=周四，留空自动分配)',
+            '不参与校本课程(TRUE/FALSE)', '周课时下限(留空不限)',
+            '周课时上限(留空不限)', IMPORT_KEY_HEADER,
+            '送教分组导入键', '校本课程分组导入键',
+        ],
         'fk_fields': {
             'travel_group__name': ('travel_group', TravelGroup, 'name'),
             'combined_class_group__name': ('combined_class_group', CombinedClassGroup, 'name'),
+            'travel_group__import_key': ('travel_group', TravelGroup, 'import_key'),
+            'combined_class_group__import_key': ('combined_class_group', CombinedClassGroup, 'import_key'),
         },
     },
     '班级': {
         'model': SchoolClass,
-        'fields': ['name', 'grade', 'homeroom_teacher__name'],
-        'headers': ['班级名称', '年级', '班主任姓名'],
+        'fields': ['name', 'grade', 'homeroom_teacher__name', 'import_key', 'homeroom_teacher__import_key'],
+        'headers': ['班级名称', '年级', '班主任姓名', IMPORT_KEY_HEADER, '班主任导入键'],
         'fk_fields': {
             'homeroom_teacher__name': ('homeroom_teacher', Teacher, 'name'),
+            'homeroom_teacher__import_key': ('homeroom_teacher', Teacher, 'import_key'),
         },
     },
     '教师资质': {
         'model': TeacherQualification,
-        'fields': ['teacher__name', 'subject__name'],
-        'headers': ['教师姓名', '课程名称'],
+        'fields': ['teacher__name', 'subject__name', 'teacher__import_key', 'subject__import_key'],
+        'headers': ['教师姓名', '课程名称', '教师导入键', '课程导入键'],
         'fk_fields': {
             'teacher__name': ('teacher', Teacher, 'name'),
             'subject__name': ('subject', Subject, 'name'),
+            'teacher__import_key': ('teacher', Teacher, 'import_key'),
+            'subject__import_key': ('subject', Subject, 'import_key'),
         },
     },
     '授课分配': {
         'model': ClassSubjectTeacher,
-        'fields': ['school_class__name', 'subject__name', 'teacher__name', 'is_manual'],
-        'headers': ['班级名称', '课程名称', '教师姓名', '手动指定(TRUE/FALSE)'],
+        'fields': [
+            'school_class__name', 'subject__name', 'teacher__name', 'is_manual',
+            'school_class__import_key', 'subject__import_key', 'teacher__import_key',
+        ],
+        'headers': [
+            '班级名称', '课程名称', '教师姓名', '手动指定(TRUE/FALSE)',
+            '班级导入键', '课程导入键', '教师导入键',
+        ],
         'fk_fields': {
             'school_class__name': ('school_class', SchoolClass, 'name'),
             'subject__name': ('subject', Subject, 'name'),
             'teacher__name': ('teacher', Teacher, 'name'),
+            'school_class__import_key': ('school_class', SchoolClass, 'import_key'),
+            'subject__import_key': ('subject', Subject, 'import_key'),
+            'teacher__import_key': ('teacher', Teacher, 'import_key'),
         },
     },
     '课表锁定': {
         'model': ScheduleLock,
-        'fields': ['school_class__name', 'subject__name', 'teacher__name', 'day', 'period'],
-        'headers': ['班级名称', '课程名称', '教师姓名(可空)', '星期(0-4)', '节次(0-5)'],
+        'fields': [
+            'school_class__name', 'subject__name', 'teacher__name', 'day', 'period',
+            'school_class__import_key', 'subject__import_key', 'teacher__import_key',
+        ],
+        'headers': [
+            '班级名称', '课程名称', '教师姓名(可空)', '星期(0-4)', '节次(0-5)',
+            '班级导入键', '课程导入键', '教师导入键',
+        ],
         'fk_fields': {
             'school_class__name': ('school_class', SchoolClass, 'name'),
             'subject__name': ('subject', Subject, 'name'),
             'teacher__name': ('teacher', Teacher, 'name'),
+            'school_class__import_key': ('school_class', SchoolClass, 'import_key'),
+            'subject__import_key': ('subject', Subject, 'import_key'),
+            'teacher__import_key': ('teacher', Teacher, 'import_key'),
         },
     },
     '教师禁排日': {
         'model': TeacherBlockedTime,
-        'fields': ['teacher__name', 'day', 'period_type'],
-        'headers': ['教师姓名', '星期(0-4)', '时段(am/pm/all)'],
+        'fields': ['teacher__name', 'day', 'period_type', 'teacher__import_key'],
+        'headers': ['教师姓名', '星期(0-4)', '时段(am/pm/all)', '教师导入键'],
         'fk_fields': {
             'teacher__name': ('teacher', Teacher, 'name'),
+            'teacher__import_key': ('teacher', Teacher, 'import_key'),
         },
     },
 }
 
-# 导出顺序（按依赖关系排列）
 EXPORT_ORDER = ['送教分组', '校本课程分组', '场地', '课程', '教师', '教师禁排日', '班级', '教师资质', '授课分配', '课表锁定']
 
 
@@ -116,126 +174,69 @@ def style_header(ws):
         cell.alignment = Alignment(horizontal='center')
 
 
-def get_name_based_sheet_configs():
-    """返回所有以 name 作为导入导出主键的基础数据配置。"""
-    seen_models = set()
-    configs = []
-    for sheet_name in EXPORT_ORDER:
-        config = SHEET_CONFIG[sheet_name]
-        model = config['model']
-        if 'name' not in config['fields'] or model in seen_models:
-            continue
-        configs.append((sheet_name, config))
-        seen_models.add(model)
-    return configs
-
-
-def format_duplicate_name_items(duplicates, unit):
-    """把重名项格式化成便于前端展示的文本。"""
-    return '、'.join(
-        f"{item['name']}（{item['count']}{unit}）"
-        for item in duplicates
-    )
-
-
-def collect_existing_duplicate_name_errors():
-    """检查当前数据库中是否存在会导致名称关联歧义的重名。"""
-    errors = []
-    for _, config in get_name_based_sheet_configs():
-        model = config['model']
-        duplicates = list(
-            model.objects
-            .exclude(name__isnull=True)
-            .exclude(name='')
-            .values('name')
-            .annotate(count=Count('id'))
-            .filter(count__gt=1)
-            .order_by('name')
-        )
-        if not duplicates:
-            continue
-        duplicate_text = format_duplicate_name_items(duplicates[:5], '条')
-        suffix = ' 等' if len(duplicates) > 5 else ''
-        errors.append(
-            f"系统中的{model._meta.verbose_name}存在重名：{duplicate_text}{suffix}"
-        )
-    return errors
-
-
-def collect_workbook_duplicate_name_errors(workbook):
-    """检查导入文件自身是否包含重名基础数据。"""
-    errors = []
-    for sheet_name, config in get_name_based_sheet_configs():
-        if sheet_name not in workbook.sheetnames:
-            continue
-
-        name_index = config['fields'].index('name')
-        name_counts = Counter()
-        for row in workbook[sheet_name].iter_rows(min_row=2, values_only=True):
-            value = row[name_index] if name_index < len(row) else None
-            if isinstance(value, str):
-                value = value.strip()
-            if value:
-                name_counts[str(value)] += 1
-
-        duplicates = [
-            {'name': name, 'count': count}
-            for name, count in sorted(name_counts.items())
-            if count > 1
-        ]
-        if not duplicates:
-            continue
-        duplicate_text = format_duplicate_name_items(duplicates[:5], '行')
-        suffix = ' 等' if len(duplicates) > 5 else ''
-        errors.append(
-            f"导入文件的“{sheet_name}”工作表存在重名：{duplicate_text}{suffix}"
-        )
-    return errors
-
-
 def build_import_response(results, errors, committed, error_message=None):
     """统一构造导入响应，便于前端区分是否已落库。"""
-    response_results = results
-    status_code = 200
     payload = {
-        'results': response_results,
+        'results': results,
         'errors': errors[:20],
         'error_count': len(errors),
         'committed': committed,
     }
 
-    if not committed:
-        payload['error'] = error_message or '导入失败，已回滚，本次未写入任何数据。'
-        payload['results'] = {
-            sheet_name: {'created': 0, 'updated': 0}
-            for sheet_name in results
-        }
-        status_code = 400
+    if committed:
+        return Response(payload, status=200)
 
-    return Response(payload, status=status_code)
-
-
-def build_export_error_response(errors, error_message):
-    """统一返回导出失败响应。"""
-    return Response({
-        'error': error_message,
-        'errors': errors[:20],
-        'error_count': len(errors),
-    }, status=400)
+    payload['error'] = error_message or '导入失败，已回滚，本次未写入任何数据。'
+    payload['results'] = {
+        sheet_name: {'created': 0, 'updated': 0}
+        for sheet_name in results
+    }
+    return Response(payload, status=400)
 
 
-def get_import_lookup_kwargs(model, data, lookup_field=None, lookup_value=None):
-    """根据模型返回导入时用于查找已有记录的键。"""
+def get_export_value(obj, field):
+    """获取导出字段值。"""
+    if '__' in field:
+        value = obj
+        for part in field.split('__'):
+            value = getattr(value, part, None) if value else None
+    else:
+        value = getattr(obj, field, None)
+
+    if isinstance(value, bool):
+        return 'TRUE' if value else 'FALSE'
+    return value
+
+
+def normalize_cell_value(value):
+    """统一处理 Excel 单元格值。"""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.upper() == 'TRUE':
+            return True
+        if stripped.upper() == 'FALSE':
+            return False
+        return stripped
+    return value
+
+
+def is_base_model(model):
+    return model in BASE_MODELS
+
+
+def get_model_lookup_kwargs(model, data):
+    """返回导入时定位现有记录所需的查询条件。"""
+    if is_base_model(model):
+        if data.get('import_key'):
+            return {'import_key': data['import_key']}
+        if data.get('name'):
+            return {'name': data['name']}
+        return None
+
     if model == TeacherQualification:
-        return {
-            'teacher': data.get('teacher'),
-            'subject': data.get('subject'),
-        }
+        return {'teacher': data.get('teacher'), 'subject': data.get('subject')}
     if model == ClassSubjectTeacher:
-        return {
-            'school_class': data.get('school_class'),
-            'subject': data.get('subject'),
-        }
+        return {'school_class': data.get('school_class'), 'subject': data.get('subject')}
     if model == ScheduleLock:
         return {
             'school_class': data.get('school_class'),
@@ -248,15 +249,38 @@ def get_import_lookup_kwargs(model, data, lookup_field=None, lookup_value=None):
             'day': data.get('day'),
             'period_type': data.get('period_type'),
         }
-    return {lookup_field: lookup_value}
+    return None
+
+
+def describe_lookup_conflict(model, lookup_kwargs):
+    if not lookup_kwargs:
+        return f'无法确定要更新的{model._meta.verbose_name}。'
+
+    if 'name' in lookup_kwargs:
+        return (
+            f'{model._meta.verbose_name}“{lookup_kwargs["name"]}”存在多条记录，'
+            '请使用带导入键的新导出模板。'
+        )
+
+    if 'import_key' in lookup_kwargs:
+        return (
+            f'{model._meta.verbose_name}导入键“{lookup_kwargs["import_key"]}”对应了多条记录。'
+        )
+
+    return f'存在多条匹配的{model._meta.verbose_name}记录。'
 
 
 def get_existing_import_instance(model, lookup_kwargs):
     """获取将被本次导入更新的已有记录。"""
+    if not lookup_kwargs:
+        return None, None
+
     try:
-        return model.objects.get(**lookup_kwargs)
+        return model.objects.get(**lookup_kwargs), None
     except model.DoesNotExist:
-        return None
+        return None, None
+    except model.MultipleObjectsReturned:
+        return None, describe_lookup_conflict(model, lookup_kwargs)
 
 
 def format_model_validation_error(model, error):
@@ -277,26 +301,104 @@ def format_model_validation_error(model, error):
     return '；'.join(str(message) for message in error.messages)
 
 
-def validate_import_instance(model, data, lookup_kwargs):
+def validate_import_instance(model, data, existing_instance=None):
     """在真正写库前执行模型层校验。"""
-    instance = get_existing_import_instance(model, lookup_kwargs) or model()
+    instance = existing_instance or model()
     for key, value in data.items():
         setattr(instance, key, value)
     instance.full_clean()
 
 
+def collect_row_data(model, fields, fk_fields, row):
+    """解析单行数据，拆分普通字段和待解析外键。"""
+    data = {}
+    pending_fks = {}
+
+    for index, field in enumerate(fields):
+        value = normalize_cell_value(row[index] if index < len(row) else None)
+
+        if field in fk_fields:
+            fk_field_name, fk_model, fk_lookup = fk_fields[field]
+            pending_entry = pending_fks.setdefault(
+                fk_field_name,
+                {'model': fk_model, 'values': {}},
+            )
+            pending_entry['values'][fk_lookup] = value
+            continue
+
+        if field == 'import_key':
+            if value:
+                data[field] = value
+            continue
+
+        if value is None:
+            model_field = model._meta.get_field(field)
+            if model_field.has_default():
+                value = model_field.default
+
+        data[field] = value
+
+    return data, pending_fks
+
+
+def resolve_foreign_key(target_field, fk_model, lookup_values):
+    """按导入键优先、名称兜底的顺序解析外键。"""
+    import_key = lookup_values.get('import_key')
+    name = lookup_values.get('name')
+
+    if import_key:
+        try:
+            return fk_model.objects.get(import_key=import_key), None
+        except fk_model.DoesNotExist:
+            return None, f'找不到{fk_model._meta.verbose_name}，导入键为“{import_key}”。'
+        except fk_model.MultipleObjectsReturned:
+            return None, f'{fk_model._meta.verbose_name}导入键“{import_key}”对应了多条记录。'
+
+    if name:
+        try:
+            return fk_model.objects.get(name=name), None
+        except fk_model.DoesNotExist:
+            return None, f'找不到{fk_model._meta.verbose_name}“{name}”。'
+        except fk_model.MultipleObjectsReturned:
+            return None, (
+                f'{fk_model._meta.verbose_name}“{name}”存在多条记录，'
+                '请使用带导入键的新导出模板。'
+            )
+
+    return None, None
+
+
+def resolve_pending_foreign_keys(data, pending_fks):
+    """把待解析外键填充到 data 中。"""
+    for target_field, entry in pending_fks.items():
+        fk_obj, error = resolve_foreign_key(
+            target_field,
+            entry['model'],
+            entry['values'],
+        )
+        if error:
+            return error
+        data[target_field] = fk_obj
+    return None
+
+
+def save_import_instance(model, data, existing_instance=None):
+    """按是否已有记录执行创建或更新。"""
+    if existing_instance is None:
+        obj = model.objects.create(**data)
+        return obj, True
+
+    for key, value in data.items():
+        setattr(existing_instance, key, value)
+    existing_instance.save()
+    return existing_instance, False
+
+
 @api_view(['GET'])
 def export_data(request):
-    """导出所有数据到Excel"""
-    duplicate_name_errors = collect_existing_duplicate_name_errors()
-    if duplicate_name_errors:
-        return build_export_error_response(
-            duplicate_name_errors,
-            '导出失败：检测到重名基础数据，当前 Excel 按名称关联，导出后无法可靠导回。请先处理重名后再试。'
-        )
-
+    """导出所有数据到 Excel。"""
     wb = Workbook()
-    wb.remove(wb.active)  # 移除默认sheet
+    wb.remove(wb.active)
 
     for sheet_name in EXPORT_ORDER:
         config = SHEET_CONFIG[sheet_name]
@@ -308,30 +410,13 @@ def export_data(request):
         ws.append(headers)
         style_header(ws)
 
-        # 获取数据
         queryset = model.objects.all()
         if model == TeacherQualification:
             queryset = queryset.filter(subject__in=get_qualification_subject_queryset())
 
         for obj in queryset:
-            row = []
-            for field in fields:
-                if '__' in field:
-                    # 外键字段
-                    parts = field.split('__')
-                    value = obj
-                    for part in parts:
-                        value = getattr(value, part, None) if value else None
-                else:
-                    value = getattr(obj, field, None)
+            ws.append([get_export_value(obj, field) for field in fields])
 
-                # 布尔值转换
-                if isinstance(value, bool):
-                    value = 'TRUE' if value else 'FALSE'
-                row.append(value)
-            ws.append(row)
-
-        # 自动调整列宽
         for col in ws.columns:
             max_length = 0
             col_letter = col[0].column_letter
@@ -339,18 +424,17 @@ def export_data(request):
                 try:
                     if cell.value:
                         max_length = max(max_length, len(str(cell.value)))
-                except:
+                except Exception:
                     pass
             ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
 
-    # 保存到内存
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
     response = HttpResponse(
         output.getvalue(),
-        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
     response['Content-Disposition'] = 'attachment; filename="course_manager_data.xlsx"'
     return response
@@ -358,37 +442,24 @@ def export_data(request):
 
 @api_view(['POST'])
 def import_data(request):
-    """从Excel导入数据"""
+    """从 Excel 导入数据。"""
     file = request.FILES.get('file')
     if not file:
         return Response({'error': '请上传文件'}, status=400)
 
     try:
         wb = load_workbook(file)
-    except Exception as e:
-        return Response({'error': f'无法读取Excel文件: {str(e)}'}, status=400)
+    except Exception as exc:
+        return Response({'error': f'无法读取 Excel 文件: {exc}'}, status=400)
 
     results = {
         sheet_name: {'created': 0, 'updated': 0}
         for sheet_name in EXPORT_ORDER
         if sheet_name in wb.sheetnames
     }
-    duplicate_name_errors = (
-        collect_existing_duplicate_name_errors() +
-        collect_workbook_duplicate_name_errors(wb)
-    )
-    if duplicate_name_errors:
-        return build_import_response(
-            results,
-            duplicate_name_errors,
-            committed=False,
-            error_message='导入失败：检测到重名基础数据，当前 Excel 按名称关联，无法可靠匹配。请先处理重名后再试。'
-        )
-
     errors = []
 
     with transaction.atomic():
-        # 按顺序导入（先导入被依赖的数据）
         for sheet_name in EXPORT_ORDER:
             if sheet_name not in wb.sheetnames:
                 continue
@@ -397,88 +468,36 @@ def import_data(request):
             model = config['model']
             fields = config['fields']
             fk_fields = config.get('fk_fields', {})
-
             ws = wb[sheet_name]
-            rows = list(ws.iter_rows(min_row=2, values_only=True))  # 跳过表头
 
             created = 0
             updated = 0
 
-            for row_idx, row in enumerate(rows, start=2):
-                if not any(row):  # 跳过空行
+            for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                if not any(row):
                     continue
 
                 try:
-                    data = {}
-                    lookup_field = None
-                    lookup_value = None
-                    row_has_error = False
-
-                    for i, field in enumerate(fields):
-                        value = row[i] if i < len(row) else None
-
-                        # 处理布尔值
-                        if isinstance(value, str) and value.upper() in ('TRUE', 'FALSE'):
-                            value = value.upper() == 'TRUE'
-
-                        if '__' in field:
-                            # 外键字段
-                            fk_info = fk_fields.get(field)
-                            if fk_info and value:
-                                fk_field_name, fk_model, fk_lookup = fk_info
-                                try:
-                                    fk_obj = fk_model.objects.get(**{fk_lookup: value})
-                                    data[fk_field_name] = fk_obj
-                                except fk_model.DoesNotExist:
-                                    errors.append(f'{sheet_name} 第{row_idx}行: 找不到 {value}')
-                                    row_has_error = True
-                                    break
-                            elif fk_info:
-                                fk_field_name = fk_info[0]
-                                data[fk_field_name] = None
-                        else:
-                            # 空值使用模型字段默认值
-                            if value is None:
-                                model_field = model._meta.get_field(field)
-                                if model_field.has_default():
-                                    value = model_field.default
-                            data[field] = value
-                            # 用第一个非外键字段作为查找字段
-                            if lookup_field is None and value:
-                                lookup_field = field
-                                lookup_value = value
-
-                    if row_has_error:
+                    data, pending_fks = collect_row_data(model, fields, fk_fields, row)
+                    if not data and not pending_fks:
                         continue
 
-                    if not data or not lookup_field:
+                    fk_error = resolve_pending_foreign_keys(data, pending_fks)
+                    if fk_error:
+                        errors.append(f'{sheet_name} 第{row_idx}行: {fk_error}')
                         continue
 
-                    lookup_kwargs = get_import_lookup_kwargs(
-                        model,
-                        data,
-                        lookup_field=lookup_field,
-                        lookup_value=lookup_value,
-                    )
+                    lookup_kwargs = get_model_lookup_kwargs(model, data)
+                    existing_instance, lookup_error = get_existing_import_instance(model, lookup_kwargs)
+                    if lookup_error:
+                        errors.append(f'{sheet_name} 第{row_idx}行: {lookup_error}')
+                        continue
 
-                    # 根据名称查找或创建
                     if model == TeacherQualification:
                         if not is_subject_qualification_managed(data.get('subject')):
                             continue
-                        try:
-                            validate_import_instance(model, data, lookup_kwargs)
-                        except ValidationError as e:
-                            errors.append(
-                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
-                            )
-                            continue
-                        # 资质表用组合键查找
-                        obj, is_created = model.objects.get_or_create(
-                            teacher=data.get('teacher'),
-                            subject=data.get('subject'),
-                            defaults=data
-                        )
-                    elif model == ClassSubjectTeacher:
+
+                    if model == ClassSubjectTeacher:
                         validation_error = get_assignment_subject_validation_error(
                             data.get('school_class'),
                             data.get('subject'),
@@ -486,74 +505,24 @@ def import_data(request):
                         if validation_error:
                             errors.append(f'{sheet_name} 第{row_idx}行: {validation_error}')
                             continue
-                        try:
-                            validate_import_instance(model, data, lookup_kwargs)
-                        except ValidationError as e:
-                            errors.append(
-                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
-                            )
-                            continue
-                        # 授课分配用组合键查找
-                        obj, is_created = model.objects.get_or_create(
-                            school_class=data.get('school_class'),
-                            subject=data.get('subject'),
-                            defaults=data
-                        )
-                        if not is_created:
-                            for k, v in data.items():
-                                setattr(obj, k, v)
-                            obj.save()
-                    elif model == ScheduleLock:
-                        try:
-                            validate_import_instance(model, data, lookup_kwargs)
-                        except ValidationError as e:
-                            errors.append(
-                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
-                            )
-                            continue
-                        # 课表锁定用组合键查找
-                        obj, is_created = model.objects.update_or_create(
-                            school_class=data.get('school_class'),
-                            day=data.get('day'),
-                            period=data.get('period'),
-                            defaults=data
-                        )
-                    elif model == TeacherBlockedTime:
-                        try:
-                            validate_import_instance(model, data, lookup_kwargs)
-                        except ValidationError as e:
-                            errors.append(
-                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
-                            )
-                            continue
-                        # 教师禁排日用组合键查找
-                        obj, is_created = model.objects.update_or_create(
-                            teacher=data.get('teacher'),
-                            day=data.get('day'),
-                            period_type=data.get('period_type'),
-                            defaults=data
-                        )
-                    else:
-                        try:
-                            validate_import_instance(model, data, lookup_kwargs)
-                        except ValidationError as e:
-                            errors.append(
-                                f'{sheet_name} 第{row_idx}行: {format_model_validation_error(model, e)}'
-                            )
-                            continue
-                        # 其他表用name字段查找
-                        obj, is_created = model.objects.update_or_create(
-                            **{lookup_field: lookup_value},
-                            defaults=data
-                        )
 
+                    try:
+                        validate_import_instance(model, data, existing_instance)
+                    except ValidationError as exc:
+                        errors.append(
+                            f'{sheet_name} 第{row_idx}行: '
+                            f'{format_model_validation_error(model, exc)}'
+                        )
+                        continue
+
+                    _, is_created = save_import_instance(model, data, existing_instance)
                     if is_created:
                         created += 1
                     else:
                         updated += 1
 
-                except Exception as e:
-                    errors.append(f'{sheet_name} 第{row_idx}行: {str(e)}')
+                except Exception as exc:
+                    errors.append(f'{sheet_name} 第{row_idx}行: {exc}')
 
             results[sheet_name] = {'created': created, 'updated': updated}
 
