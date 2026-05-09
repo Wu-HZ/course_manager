@@ -17,6 +17,7 @@ from .models import (
     CombinedClassGroup,
     Location,
     ScheduleLock,
+    SchedulerSettings,
     SchoolClass,
     Subject,
     Teacher,
@@ -159,9 +160,42 @@ SHEET_CONFIG = {
             'teacher__import_key': ('teacher', Teacher, 'import_key'),
         },
     },
+    '排课参数': {
+        'model': SchedulerSettings,
+        'fields': [
+            'class_meeting_name',
+            'combined_class_slots',
+            'solver_num_workers',
+            'h9_consecutive_forbidden',
+            'h11_teacher_class_daily_max',
+            's1_am_preference_weight',
+            's2_consecutive_weight',
+            's3_distribution_weight',
+            's4_teacher_daily_threshold',
+            's4_teacher_daily_weight',
+            's5_avoid_first_weight',
+            's6_subject_switch_weight',
+            's7_same_class_subject_switch_weight',
+        ],
+        'headers': [
+            '班会课程名称',
+            '合班课时段',
+            '求解器线程数',
+            '连堂禁止跨节边界',
+            '教师同班单日上限',
+            '上午优先权重',
+            '连堂偏好权重',
+            '分布均匀权重',
+            '教师日负荷阈值',
+            '教师日负荷权重',
+            '避免第一节权重',
+            '换班惩罚权重',
+            '同班换科惩罚权重',
+        ],
+    },
 }
 
-EXPORT_ORDER = ['送教分组', '校本课程分组', '场地', '课程', '教师', '教师禁排日', '班级', '教师资质', '授课分配', '课表锁定']
+EXPORT_ORDER = ['送教分组', '校本课程分组', '场地', '课程', '教师', '教师禁排日', '班级', '教师资质', '授课分配', '课表锁定', '排课参数']
 
 
 def style_header(ws):
@@ -249,6 +283,8 @@ def get_model_lookup_kwargs(model, data):
             'day': data.get('day'),
             'period_type': data.get('period_type'),
         }
+    if model == SchedulerSettings:
+        return {'pk': 1}
     return None
 
 
@@ -410,7 +446,11 @@ def export_data(request):
         ws.append(headers)
         style_header(ws)
 
-        queryset = model.objects.all()
+        if model == SchedulerSettings:
+            queryset = [SchedulerSettings.get_settings()]
+        else:
+            queryset = model.objects.all()
+
         if model == TeacherQualification:
             queryset = queryset.filter(subject__in=get_qualification_subject_queryset())
 
@@ -472,12 +512,17 @@ def import_data(request):
 
             created = 0
             updated = 0
+            singleton_row_imported = False
 
             for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                 if not any(row):
                     continue
 
                 try:
+                    if model == SchedulerSettings and singleton_row_imported:
+                        errors.append(f'{sheet_name} 第{row_idx}行: 该工作表只能包含一行参数设置。')
+                        continue
+
                     data, pending_fks = collect_row_data(model, fields, fk_fields, row)
                     if not data and not pending_fks:
                         continue
@@ -516,6 +561,8 @@ def import_data(request):
                         continue
 
                     _, is_created = save_import_instance(model, data, existing_instance)
+                    if model == SchedulerSettings:
+                        singleton_row_imported = True
                     if is_created:
                         created += 1
                     else:

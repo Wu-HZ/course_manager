@@ -367,6 +367,81 @@ class ImportDataTests(APITestCase):
         self.assertEqual(response.data['results'][teacher_sheet]['created'], 0)
         self.assertEqual(response.data['results'][teacher_sheet]['updated'], 1)
 
+    def test_import_updates_scheduler_settings(self):
+        settings_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is SchedulerSettings
+        )
+        SchedulerSettings.get_settings()
+
+        workbook_bytes = self.build_workbook({
+            settings_sheet: [[
+                '主题班会',
+                '0,0;0,1',
+                2,
+                '0,1',
+                1,
+                11,
+                12,
+                13,
+                4,
+                15,
+                16,
+                17,
+                18,
+            ]]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        settings = SchedulerSettings.get_settings()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['committed'])
+        self.assertEqual(settings.class_meeting_name, '主题班会')
+        self.assertEqual(settings.combined_class_slots, '0,0;0,1')
+        self.assertEqual(settings.solver_num_workers, 2)
+        self.assertEqual(settings.h9_consecutive_forbidden, '0,1')
+        self.assertEqual(settings.s7_same_class_subject_switch_weight, 18)
+        self.assertEqual(response.data['results'][settings_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][settings_sheet]['updated'], 1)
+
+    def test_import_rejects_multiple_scheduler_settings_rows(self):
+        settings_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is SchedulerSettings
+        )
+        original_settings = SchedulerSettings.get_settings()
+
+        workbook_bytes = self.build_workbook({
+            settings_sheet: [
+                ['班会A', '1,4;1,5', 4, '1,2', 2, 10, 5, 2, 3, 8, 6, 5, 3],
+                ['班会B', '3,4;3,5', 3, '0,1', 1, 9, 4, 1, 2, 7, 5, 4, 2],
+            ]
+        })
+        upload = SimpleUploadedFile(
+            'import.xlsx',
+            workbook_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        request = self.factory.post('/api/data/import/', {'file': upload}, format='multipart')
+        response = import_data(request)
+
+        original_settings.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['committed'])
+        self.assertEqual(original_settings.class_meeting_name, '班会')
+        self.assertEqual(response.data['results'][settings_sheet]['created'], 0)
+        self.assertEqual(response.data['results'][settings_sheet]['updated'], 0)
+        self.assertEqual(response.data['error_count'], 1)
+        self.assertIn('只能包含一行参数设置', response.data['errors'][0])
+
 
 class ExportDataTests(APITestCase):
     def setUp(self):
@@ -430,3 +505,30 @@ class ExportDataTests(APITestCase):
             exported_keys,
             {'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ffffffffffffffffffffffffffffffff'}
         )
+
+    def test_export_includes_scheduler_settings_sheet(self):
+        settings_sheet = next(
+            name for name, config in SHEET_CONFIG.items()
+            if config['model'] is SchedulerSettings
+        )
+        settings = SchedulerSettings.get_settings()
+        settings.class_meeting_name = '主题班会'
+        settings.combined_class_slots = '0,0;0,1'
+        settings.solver_num_workers = 2
+        settings.save()
+
+        request = self.factory.get('/api/data/export/')
+        response = export_data(request)
+
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(BytesIO(response.content))
+        self.assertIn(settings_sheet, workbook.sheetnames)
+        ws = workbook[settings_sheet]
+        headers = [cell.value for cell in ws[1]]
+        data_row = [cell.value for cell in ws[2]]
+
+        self.assertEqual(headers[0], '班会课程名称')
+        self.assertEqual(headers[2], '求解器线程数')
+        self.assertEqual(data_row[0], '主题班会')
+        self.assertEqual(data_row[1], '0,0;0,1')
+        self.assertEqual(data_row[2], 2)
