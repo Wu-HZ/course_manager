@@ -385,6 +385,7 @@ class ImportDataTests(APITestCase):
                 2,
                 '0,1',
                 1,
+                'FALSE',
                 11,
                 12,
                 13,
@@ -411,6 +412,7 @@ class ImportDataTests(APITestCase):
         self.assertEqual(settings.combined_class_slots, '0,0;0,1')
         self.assertEqual(settings.solver_num_workers, 2)
         self.assertEqual(settings.h9_consecutive_forbidden, '0,1')
+        self.assertFalse(settings.h14_homeroom_main_subject)
         self.assertEqual(settings.s7_same_class_subject_switch_weight, 18)
         self.assertEqual(response.data['results'][settings_sheet]['created'], 0)
         self.assertEqual(response.data['results'][settings_sheet]['updated'], 1)
@@ -465,8 +467,8 @@ class ImportDataTests(APITestCase):
 
         workbook_bytes = self.build_workbook({
             settings_sheet: [
-                ['班会A', '1,4;1,5', 4, '1,2', 2, 10, 5, 2, 3, 8, 6, 5, 3],
-                ['班会B', '3,4;3,5', 3, '0,1', 1, 9, 4, 1, 2, 7, 5, 4, 2],
+                ['班会A', '1,4;1,5', 4, '1,2', 2, 'TRUE', 10, 5, 2, 3, 8, 6, 5, 3],
+                ['班会B', '3,4;3,5', 3, '0,1', 1, 'FALSE', 9, 4, 1, 2, 7, 5, 4, 2],
             ]
         })
         upload = SimpleUploadedFile(
@@ -537,6 +539,15 @@ class SchedulerSettingsSchemaMigrationTests(APITestCase):
             }
 
         self.assertNotIn('f2_enable_homeroom_main_subject', after_columns)
+
+        # 真实迁移链在 0024 之后会继续补充更新的字段（如 0026 的 h14）。
+        # 规范化把表重建为 0024 时代的列集，这里手动补齐以便 ORM 正常访问单例表。
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'ALTER TABLE "core_schedulersettings" '
+                'ADD COLUMN "h14_homeroom_main_subject" bool NOT NULL DEFAULT 1'
+            )
+
         self.assertEqual(SchedulerSettings.get_settings().pk, 1)
 
 

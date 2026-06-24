@@ -316,6 +316,10 @@ class SchedulerSettings(models.Model):
         '教师同班单日上限', default=2,
         help_text='同一教师同一天在同一班级最多上几节课'
     )
+    h14_homeroom_main_subject = models.BooleanField(
+        '班主任必须担任主课', default=True,
+        help_text='开启后，每个班级的班主任必须在本班至少担任一门主课，否则排课失败'
+    )
 
     # 软约束权重
     s1_am_preference_weight = models.IntegerField(

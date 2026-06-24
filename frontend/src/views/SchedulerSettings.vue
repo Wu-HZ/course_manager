@@ -63,6 +63,10 @@
                       :placeholder="field.placeholder || ''"
                       clearable
                     />
+                    <div v-else-if="field.type === 'switch'" class="switch-control">
+                      <el-switch v-model="form[field.key]" />
+                      <span class="field-card__unit">{{ form[field.key] ? '已启用' : '已关闭' }}</span>
+                    </div>
                     <div v-else class="number-control">
                       <el-input-number
                         v-model="form[field.key]"
@@ -100,6 +104,10 @@
                 :placeholder="field.placeholder || ''"
                 clearable
               />
+              <div v-else-if="field.type === 'switch'" class="switch-control">
+                <el-switch v-model="form[field.key]" />
+                <span class="field-card__unit">{{ form[field.key] ? '已启用' : '已关闭' }}</span>
+              </div>
               <div v-else class="number-control">
                 <el-input-number
                   v-model="form[field.key]"
@@ -173,6 +181,15 @@ const hardConstraintFields = [
     unit: '节',
     help: '限制同一教师在同一天、同一班级的总排课节数。',
     note: '这是按“教师 + 班级 + 日期”汇总计算的，不区分该教师在这个班教的是哪一门课。过小会增加排课难度，过大则可能让课表过于集中。',
+  },
+  {
+    key: 'h14_homeroom_main_subject',
+    code: 'H14',
+    label: '班主任必须担任主课',
+    type: 'switch',
+    spanClass: 'field-card--span-2',
+    help: '开启后，每个班级的班主任必须在本班至少担任一门主课，否则排课会失败。',
+    note: '系统会优先把主课分配给班主任。若该班主任没有任何主课资质、或主课已被占满，将无法排课。关闭后班主任与普通教师一样参与分配，不再强制担任主课。',
   },
 ]
 
@@ -310,6 +327,7 @@ const form = ref({
   solver_num_workers: 4,
   h9_consecutive_forbidden: '1,2;3,4',
   h11_teacher_class_daily_max: 2,
+  h14_homeroom_main_subject: true,
   s1_am_preference_weight: 10,
   s2_consecutive_weight: 5,
   s3_distribution_weight: 2,
@@ -569,6 +587,12 @@ onMounted(loadSettings)
 }
 
 .number-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.switch-control {
   display: flex;
   align-items: center;
   gap: 10px;
