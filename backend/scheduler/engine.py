@@ -1007,8 +1007,9 @@ class ScheduleEngine:
             if day_off is not None:
                 available_days = 4
 
-            # 每天最多2节，所以最多 available_days * 2
-            max_possible = available_days * 2
+            # 每天最多 h11 节，所以最多 available_days * h11
+            h11_max = self.settings.h11_teacher_class_daily_max
+            max_possible = available_days * h11_max
 
             if total_hours > max_possible:
                 has_h11_issue = True
@@ -1016,7 +1017,7 @@ class ScheduleEngine:
                 day_off_info = f", 禁排日: {DAYS[day_off]}" if day_off is not None else ""
                 diagnostics.append(
                     f"[错误] {teacher.name} 在 {class_obj.name} 需上 {total_hours} 节 ({subjects_info})"
-                    f"{day_off_info}, 但每天最多2节，{available_days}天最多 {max_possible} 节"
+                    f"{day_off_info}, 但每天最多{h11_max}节，{available_days}天最多 {max_possible} 节"
                 )
 
         if not has_h11_issue:

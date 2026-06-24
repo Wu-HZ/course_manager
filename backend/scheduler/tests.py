@@ -231,3 +231,30 @@ class MainSubjectLimitAssignmentTests(TestCase):
 
         self.assertFalse(ok)
         self.assertTrue(any('分配教师' in e for e in engine.errors), engine.errors)
+
+
+class H11DiagnosticsTests(TestCase):
+    """无解诊断中的 H11 同班单日上限应使用配置值，而非写死的 2。"""
+
+    def test_diagnostic_uses_configured_daily_limit(self):
+        settings = SchedulerSettings.get_settings()
+        settings.h11_teacher_class_daily_max = 3
+        settings.save()
+
+        teacher = Teacher.objects.create(name='李老师')
+        # 单门课课时高到必然超过 available_days * h11，触发 H11 诊断
+        subject = Subject.objects.create(
+            name='阅读', weekly_hours=16, max_teacher_classes=5
+        )
+        TeacherQualification.objects.create(teacher=teacher, subject=subject)
+        SchoolClass.objects.create(name='一班', grade=1)
+
+        engine = ScheduleEngine()
+        engine.load_data()
+        self.assertTrue(engine.auto_assign_teachers(), engine.errors)
+        diagnostics = engine.analyze_infeasibility()
+
+        h11_lines = [d for d in diagnostics if '每天最多' in d]
+        self.assertTrue(h11_lines, diagnostics)
+        self.assertTrue(any('每天最多3节' in d for d in h11_lines), h11_lines)
+        self.assertFalse(any('每天最多2节' in d for d in h11_lines), h11_lines)
